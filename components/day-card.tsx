@@ -5,6 +5,7 @@ import { useRef, useEffect } from "react"
 
 interface DayCardProps {
   slot: { id: string; label: string; fullLabel: string }
+  date?: Date
   content: string
   onUpdate: (value: string) => void
   categoryColor: string
@@ -14,7 +15,22 @@ interface DayCardProps {
   tags: string[]
 }
 
-export function DayCard({ slot, content, onUpdate, categoryColor, isDimmed, isToday, isGoals, tags }: DayCardProps) {
+const MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December"
+]
+
+export function DayCard({
+  slot,
+  date,
+  content,
+  onUpdate,
+  categoryColor,
+  isDimmed,
+  isToday,
+  isGoals,
+  tags,
+}: DayCardProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Auto-resize textarea
@@ -25,6 +41,10 @@ export function DayCard({ slot, content, onUpdate, categoryColor, isDimmed, isTo
       el.style.height = `${el.scrollHeight}px`
     }
   }, [content])
+
+  const formatDate = (d: Date) => {
+    return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
+  }
 
   return (
     <div
@@ -57,7 +77,14 @@ export function DayCard({ slot, content, onUpdate, categoryColor, isDimmed, isTo
             ) : isToday ? (
               <Sparkles className="w-4 h-4 animate-pulse" style={{ color: categoryColor }} />
             ) : null}
-            <h3 className="font-bold text-sm tracking-tight">{slot.fullLabel}</h3>
+            <div className="flex items-center gap-2">
+              <h3 className="font-bold text-sm tracking-tight">{slot.fullLabel}</h3>
+              {date && !isGoals && (
+                <span className="text-xs text-muted-foreground font-medium">
+                  {date.getDate()}
+                </span>
+              )}
+            </div>
             {isToday && (
               <span
                 className="text-[10px] font-bold px-2 py-0.5 rounded-full"
@@ -71,19 +98,26 @@ export function DayCard({ slot, content, onUpdate, categoryColor, isDimmed, isTo
             )}
           </div>
 
-          {tags.length > 0 && (
-            <div className="flex gap-1">
-              {tags.slice(0, 2).map((tag) => (
-                <span
-                  key={tag}
-                  className="text-[10px] font-medium bg-secondary px-2 py-0.5 rounded-full text-muted-foreground"
-                >
-                  {tag}
-                </span>
-              ))}
-              {tags.length > 2 && <span className="text-[10px] text-muted-foreground">+{tags.length - 2}</span>}
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {date && !isGoals && (
+              <span className="text-[10px] text-muted-foreground">
+                {formatDate(date)}
+              </span>
+            )}
+            {tags.length > 0 && (
+              <div className="flex gap-1">
+                {tags.slice(0, 2).map((tag) => (
+                  <span
+                    key={tag}
+                    className="text-[10px] font-medium bg-secondary px-2 py-0.5 rounded-full text-muted-foreground"
+                  >
+                    {tag}
+                  </span>
+                ))}
+                {tags.length > 2 && <span className="text-[10px] text-muted-foreground">+{tags.length - 2}</span>}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Content */}

@@ -5,7 +5,7 @@ import { WeekNavigator } from "@/components/week-navigator"
 import { CategoryTabs } from "@/components/category-tabs"
 import { DayCard } from "@/components/day-card"
 import { TagFilter } from "@/components/tag-filter"
-import { CalendarSheet } from "@/components/calendar-sheet"
+import { MonthCalendar } from "@/components/month-calendar"
 import { StatsPanel } from "@/components/stats-panel"
 import { QuickActions } from "@/components/quick-actions"
 import { StatusIndicator } from "@/components/status-indicator"
@@ -33,13 +33,46 @@ const DAYS_OF_WEEK = [
 const GOAL_SLOT = { id: "goals", label: "Goals", fullLabel: "Weekly Goals" }
 const ALL_SLOTS = [...DAYS_OF_WEEK, GOAL_SLOT]
 
-function getCurrentWeek(): number {
-  const date = new Date()
+// Calendar boundaries
+const MIN_DATE = new Date(2026, 3, 1) // April 1, 2026
+const MAX_DATE = new Date(2028, 11, 31) // December 31, 2028
+const TODAY = new Date(2026, 3, 15) // April 15, 2026 (current date)
+
+function getWeekNumber(date: Date): number {
   const temp = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
   const dayNum = temp.getUTCDay() || 7
   temp.setUTCDate(temp.getUTCDate() + 4 - dayNum)
   const yearStart = new Date(Date.UTC(temp.getUTCFullYear(), 0, 1))
   return Math.ceil(((temp.getTime() - yearStart.getTime()) / 86400000 + 1) / 7)
+}
+
+function getWeekStartDate(date: Date): Date {
+  const d = new Date(date)
+  const day = d.getDay()
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1) // Adjust when day is Sunday
+  d.setDate(diff)
+  d.setHours(0, 0, 0, 0)
+  return d
+}
+
+function getWeekEndDate(weekStart: Date): Date {
+  const d = new Date(weekStart)
+  d.setDate(d.getDate() + 6)
+  return d
+}
+
+function getWeekDates(weekStart: Date): Date[] {
+  const dates: Date[] = []
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(weekStart)
+    d.setDate(d.getDate() + i)
+    dates.push(d)
+  }
+  return dates
+}
+
+function formatDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
 }
 
 function extractTags(text: string): string[] {
@@ -48,24 +81,37 @@ function extractTags(text: string): string[] {
   return matches ?? []
 }
 
-function getTodaySlot(): string {
-  const days = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"]
-  return days[new Date().getDay()]
+function isSameDay(d1: Date, d2: Date): boolean {
+  return (
+    d1.getDate() === d2.getDate() &&
+    d1.getMonth() === d2.getMonth() &&
+    d1.getFullYear() === d2.getFullYear()
+  )
 }
 
 export default function PlannerPage() {
-  const [week, setWeek] = useState(getCurrentWeek)
+  const [currentWeekStart, setCurrentWeekStart] = useState(() => getWeekStartDate(TODAY))
   const [category, setCategory] = useState<CategoryId>("personal")
   const [weekData, setWeekData] = useState<Record<string, string>>({})
   const [status, setStatus] = useState<"saved" | "saving" | "offline">("saved")
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [showCalendar, setShowCalendar] = useState(false)
+  const [calendarViewDate, setCalendarViewDate] = useState(new Date(currentWeekStart))
   const [showStats, setShowStats] = useState(false)
   const [isLoaded, setIsLoaded] = useState(false)
 
+  const weekNumber = getWeekNumber(currentWeekStart)
+  const weekEndDate = getWeekEndDate(currentWeekStart)
+  const weekDates = getWeekDates(currentWeekStart)
+
+  // Storage key based on week start date
+  const storageKey = useMemo(
+    () => `last-one-week-${formatDateKey(currentWeekStart)}-${category}`,
+    [currentWeekStart, category]
+  )
+
   // Load data from localStorage
   useEffect(() => {
-    const storageKey = `last-one-week-${week}-${category}`
     const stored = localStorage.getItem(storageKey)
     if (stored) {
       try {
@@ -77,13 +123,12 @@ export default function PlannerPage() {
       setWeekData({})
     }
     setIsLoaded(true)
-  }, [week, category])
+  }, [storageKey])
 
   // Save data with debounce
   const saveData = useCallback(
     (data: Record<string, string>) => {
       setStatus("saving")
-      const storageKey = `last-one-week-${week}-${category}`
 
       const timeout = setTimeout(() => {
         try {
@@ -96,7 +141,7 @@ export default function PlannerPage() {
 
       return () => clearTimeout(timeout)
     },
-    [week, category],
+    [storageKey]
   )
 
   const handleUpdate = useCallback(
@@ -107,8 +152,45 @@ export default function PlannerPage() {
         return updated
       })
     },
-    [saveData],
+    [saveData]
   )
+
+  const handlePrevWeek = useCallback(() => {
+    const newStart = new Date(currentWeekStart)
+    newStart.setDate(newStart.getDate() - 7)
+    if (newStart >= getWeekStartDate(MIN_DATE)) {
+      setCurrentWeekStart(newStart)
+    }
+  }, [currentWeekStart])
+
+  const handleNextWeek = useCallback(() => {
+    const newStart = new Date(currentWeekStart)
+    newStart.setDate(newStart.getDate() + 7)
+    if (newStart <= getWeekStartDate(MAX_DATE)) {
+      setCurrentWeekStart(newStart)
+    }
+  }, [currentWeekStart])
+
+  const handleGoToToday = useCallback(() => {
+    setCurrentWeekStart(getWeekStartDate(TODAY))
+  }, [])
+
+  const handleSelectDate = useCallback((date: Date) => {
+    setCurrentWeekStart(getWeekStartDate(date))
+    setShowCalendar(false)
+  }, [])
+
+  const canGoPrev = useMemo(() => {
+    const prevWeekStart = new Date(currentWeekStart)
+    prevWeekStart.setDate(prevWeekStart.getDate() - 7)
+    return prevWeekStart >= getWeekStartDate(MIN_DATE)
+  }, [currentWeekStart])
+
+  const canGoNext = useMemo(() => {
+    const nextWeekStart = new Date(currentWeekStart)
+    nextWeekStart.setDate(nextWeekStart.getDate() + 7)
+    return nextWeekStart <= getWeekStartDate(MAX_DATE)
+  }, [currentWeekStart])
 
   // Extract all tags from current week data
   const allTags = useMemo(() => {
@@ -130,7 +212,6 @@ export default function PlannerPage() {
   }, [weekData, allTags])
 
   const currentCategory = CATEGORIES.find((c) => c.id === category)!
-  const todaySlot = getTodaySlot()
 
   if (!isLoaded) {
     return (
@@ -163,7 +244,7 @@ export default function PlannerPage() {
               <div>
                 <h1 className="text-lg font-bold tracking-tight">Last-One</h1>
                 <p className="text-xs text-muted-foreground">
-                  Week {week} · {new Date().getFullYear()}
+                  Week {weekNumber} · {currentWeekStart.getFullYear()}
                 </p>
               </div>
             </div>
@@ -183,7 +264,12 @@ export default function PlannerPage() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setShowCalendar(!showCalendar)}
+                onClick={() => {
+                  setShowCalendar(!showCalendar)
+                  if (!showCalendar) {
+                    setCalendarViewDate(new Date(currentWeekStart))
+                  }
+                }}
                 className={showCalendar ? "bg-secondary" : ""}
               >
                 <Calendar className="w-5 h-5" />
@@ -197,12 +283,13 @@ export default function PlannerPage() {
       </header>
 
       <main className="max-w-lg mx-auto px-4 pt-4">
-        {/* Calendar Sheet */}
+        {/* Month Calendar */}
         {showCalendar && (
-          <CalendarSheet
-            year={new Date().getFullYear()}
-            currentWeek={week}
-            onSelectWeek={setWeek}
+          <MonthCalendar
+            currentDate={calendarViewDate}
+            selectedDate={currentWeekStart}
+            onSelectDate={handleSelectDate}
+            onMonthChange={setCalendarViewDate}
             onClose={() => setShowCalendar(false)}
           />
         )}
@@ -220,10 +307,14 @@ export default function PlannerPage() {
 
         {/* Week Navigator */}
         <WeekNavigator
-          week={week}
-          onPrevious={() => setWeek((w) => Math.max(1, w - 1))}
-          onNext={() => setWeek((w) => Math.min(52, w + 1))}
-          onToday={() => setWeek(getCurrentWeek())}
+          weekNumber={weekNumber}
+          weekStartDate={currentWeekStart}
+          weekEndDate={weekEndDate}
+          onPrevious={handlePrevWeek}
+          onNext={handleNextWeek}
+          onToday={handleGoToToday}
+          canGoPrev={canGoPrev}
+          canGoNext={canGoNext}
         />
 
         {/* Tag Filter */}
@@ -231,17 +322,19 @@ export default function PlannerPage() {
 
         {/* Day Cards */}
         <div className="space-y-3 mt-4">
-          {ALL_SLOTS.map((slot) => {
+          {ALL_SLOTS.map((slot, index) => {
             const content = weekData[slot.id] ?? ""
             const tags = extractTags(content)
             const isDimmed = activeTag && !tags.includes(activeTag)
-            const isToday = slot.id === todaySlot
             const isGoals = slot.id === "goals"
+            const slotDate = isGoals ? undefined : weekDates[index]
+            const isToday = slotDate ? isSameDay(slotDate, TODAY) : false
 
             return (
               <DayCard
                 key={slot.id}
                 slot={slot}
+                date={slotDate}
                 content={content}
                 onUpdate={(val) => handleUpdate(slot.id, val)}
                 categoryColor={currentCategory.color}
@@ -258,8 +351,13 @@ export default function PlannerPage() {
       {/* Quick Actions FAB */}
       <QuickActions
         onJumpToToday={() => {
-          const todayEl = document.getElementById(`day-${todaySlot}`)
-          todayEl?.scrollIntoView({ behavior: "smooth", block: "center" })
+          handleGoToToday()
+          setTimeout(() => {
+            const dayIndex = TODAY.getDay()
+            const dayId = DAYS_OF_WEEK[dayIndex === 0 ? 6 : dayIndex - 1].id
+            const todayEl = document.getElementById(`day-${dayId}`)
+            todayEl?.scrollIntoView({ behavior: "smooth", block: "center" })
+          }, 100)
         }}
         onClearWeek={() => {
           if (confirm("Clear all entries for this week?")) {
