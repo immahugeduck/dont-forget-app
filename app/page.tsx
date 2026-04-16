@@ -10,8 +10,9 @@ import { StatsPanel } from "@/components/stats-panel"
 import { QuickActions } from "@/components/quick-actions"
 import { StatusIndicator } from "@/components/status-indicator"
 import { usePlannerData } from "@/hooks/use-planner-data"
-import { Calendar, BarChart3, Sparkles, Zap, LogIn, LogOut, User } from "lucide-react"
+import { Calendar, BarChart3, Sparkles, Zap, LogIn, LogOut, User, CloudSun } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { WeatherTab } from "@/components/weather-tab"
 import Link from "next/link"
 
 const CATEGORIES = [
@@ -94,14 +95,18 @@ export default function PlannerPage() {
   const [showCalendar, setShowCalendar] = useState(false)
   const [calendarViewDate, setCalendarViewDate] = useState(new Date(currentWeekStart))
   const [showStats, setShowStats] = useState(false)
+  const [showWeather, setShowWeather] = useState(false)
 
   const {
     user,
     isLoading,
     status,
     weekData,
+    checklists,
+    weatherData,
     saveTask,
     saveGoals,
+    saveChecklist,
     clearWeek,
     signOut,
   } = usePlannerData(currentWeekStart, category)
@@ -238,8 +243,29 @@ export default function PlannerPage() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setShowStats(!showStats)}
+                onClick={() => {
+                  setShowWeather(!showWeather)
+                  if (showWeather) return
+                  setShowStats(false)
+                  setShowCalendar(false)
+                }}
+                className={showWeather ? "bg-secondary" : ""}
+                title="Weather"
+              >
+                <CloudSun className="w-5 h-5" />
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  setShowStats(!showStats)
+                  if (showStats) return
+                  setShowWeather(false)
+                  setShowCalendar(false)
+                }}
                 className={showStats ? "bg-secondary" : ""}
+                title="Stats"
               >
                 <BarChart3 className="w-5 h-5" />
               </Button>
@@ -251,9 +277,14 @@ export default function PlannerPage() {
                   setShowCalendar(!showCalendar)
                   if (!showCalendar) {
                     setCalendarViewDate(new Date(currentWeekStart))
+                  } else {
+                    return
                   }
+                  setShowStats(false)
+                  setShowWeather(false)
                 }}
                 className={showCalendar ? "bg-secondary" : ""}
+                title="Calendar"
               >
                 <Calendar className="w-5 h-5" />
               </Button>
@@ -284,6 +315,16 @@ export default function PlannerPage() {
             onMonthChange={setCalendarViewDate}
             onClose={() => setShowCalendar(false)}
           />
+        )}
+
+        {/* Weather Tab */}
+        {showWeather && (
+          <div className="mb-4 p-4 bg-card rounded-2xl border border-border">
+            <WeatherTab
+              currentWeekStart={currentWeekStart}
+              weatherData={weatherData}
+            />
+          </div>
         )}
 
         {/* Stats Panel */}
@@ -321,6 +362,13 @@ export default function PlannerPage() {
             const isGoals = slot.id === "goals"
             const slotDate = isGoals ? undefined : weekDates[index]
             const isToday = slotDate ? isSameDay(slotDate, TODAY) : false
+            
+            // Get date key for checklist and weather
+            const dateKey = slotDate 
+              ? `${slotDate.getFullYear()}-${String(slotDate.getMonth() + 1).padStart(2, "0")}-${String(slotDate.getDate()).padStart(2, "0")}`
+              : ""
+            const dayChecklist = dateKey ? checklists[dateKey] || [] : []
+            const dayWeather = dateKey ? weatherData[dateKey] || null : null
 
             return (
               <DayCard
@@ -334,6 +382,13 @@ export default function PlannerPage() {
                 isToday={isToday}
                 isGoals={isGoals}
                 tags={tags}
+                checklist={dayChecklist}
+                onChecklistUpdate={(items) => {
+                  if (dateKey) {
+                    saveChecklist(dateKey, items)
+                  }
+                }}
+                weather={dayWeather}
               />
             )
           })}

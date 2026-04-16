@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
+import { ChecklistItem } from "@/components/day-checklist"
+import { WeatherData, generateMockWeather } from "@/components/weather-display"
 
 export interface Task {
   id: string
@@ -37,6 +39,15 @@ export interface Note {
   updated_at: string
 }
 
+export interface Checklist {
+  id: string
+  user_id: string
+  date: string
+  items: ChecklistItem[]
+  created_at: string
+  updated_at: string
+}
+
 function formatDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
 }
@@ -50,9 +61,26 @@ export function usePlannerData(
   const [status, setStatus] = useState<"saved" | "saving" | "offline">("saved")
   const [weekData, setWeekData] = useState<Record<string, string>>({})
   const [events, setEvents] = useState<PlannerEvent[]>([])
+  const [checklists, setChecklists] = useState<Record<string, ChecklistItem[]>>({})
+  const [weatherData, setWeatherData] = useState<Record<string, WeatherData>>({})
 
   const supabase = createClient()
   const weekKey = formatDateKey(weekStartDate)
+
+  // Generate weather data on mount
+  useEffect(() => {
+    const weather: Record<string, WeatherData> = {}
+    const startDate = new Date(2026, 3, 1) // April 1, 2026
+    const endDate = new Date(2028, 11, 31) // Dec 31, 2028
+    
+    let current = new Date(startDate)
+    while (current <= endDate) {
+      const dateStr = formatDateKey(current)
+      weather[dateStr] = generateMockWeather(dateStr)
+      current = new Date(current.getTime() + 24 * 60 * 60 * 1000)
+    }
+    setWeatherData(weather)
+  }, [])
 
   // Check auth state
   useEffect(() => {
@@ -73,21 +101,33 @@ export function usePlannerData(
   // Load data when week/category changes
   useEffect(() => {
     if (!user) {
-      // For non-authenticated users, use localStorage
-      const storageKey = `last-one-week-${weekKey}-${category}`
-      const stored = localStorage.getItem(storageKey)
-      if (stored) {
-        try {
-          setWeekData(JSON.parse(stored))
-        } catch {
+// For non-authenticated users, use localStorage
+        const storageKey = `last-one-week-${weekKey}-${category}`
+        const stored = localStorage.getItem(storageKey)
+        if (stored) {
+          try {
+            setWeekData(JSON.parse(stored))
+          } catch {
+            setWeekData({})
+          }
+        } else {
           setWeekData({})
         }
-      } else {
-        setWeekData({})
+        // Load checklists from localStorage
+        const checklistKey = `last-one-checklists-${weekKey}`
+        const storedChecklists = localStorage.getItem(checklistKey)
+        if (storedChecklists) {
+          try {
+            setChecklists(JSON.parse(storedChecklists))
+          } catch {
+            setChecklists({})
+          }
+        } else {
+          setChecklists({})
+        }
+        setIsLoading(false)
+        return
       }
-      setIsLoading(false)
-      return
-    }
 
     const loadData = async () => {
       setIsLoading(true)
@@ -143,6 +183,21 @@ export function usePlannerData(
 
         if (!eventsError && eventsData) {
           setEvents(eventsData)
+        }
+
+        // Load checklists for the week
+        const { data: checklistsData, error: checklistsError } = await supabase
+          .from("checklists")
+          .select("*")
+          .eq("user_id", user.id)
+          .in("date", weekDates)
+
+        if (!checklistsError && checklistsData) {
+          const checklistMap: Record<string, ChecklistItem[]> = {}
+          checklistsData.forEach((c: Checklist) => {
+            checklistMap[c.date] = c.items
+          })
+          setChecklists(checklistMap)
         }
 
         setWeekData(data)
@@ -325,11 +380,72 @@ export function usePlannerData(
     }
   }, [user, category, weekKey, weekStartDate, supabase])
 
+  // Save checklist
+  const saveChecklist = useCallback(
+    async (date: string, items: ChecklistItem[]) => {
+      setStatus("saving")
+
+      // Update local state immediately
+      setChecklists((prev) => ({ ...prev, [date]: items }))
+
+      if (!user) {
+        // For non-authenticated users, use localStorage
+        const checklistKey = `last-one-checklists-${weekKey}`
+        setTimeout(() => {
+          try {
+            const updated = { ...checklists, [date]: items }
+            localStorage.setItem(checklistKey, JSON.stringify(updated))
+            setStatus("saved")
+          } catch {
+            setStatus("offline")
+          }
+        }, 300)
+        return
+      }
+
+      try {
+        // Check if checklist exists
+        const { data: existing } = await supabase
+          .from("checklists")
+          .select("id")
+          .eq("user_id", user.id)
+          .eq("date", date)
+          .single()
+
+        if (existing) {
+          // Update existing
+          const { error } = await supabase
+            .from("checklists")
+            .update({ items, updated_at: new Date().toISOString() })
+            .eq("id", existing.id)
+
+          if (error) throw error
+        } else if (items.length > 0) {
+          // Insert new
+          const { error } = await supabase.from("checklists").insert({
+            user_id: user.id,
+            date,
+            items,
+          })
+
+          if (error) throw error
+        }
+
+        setStatus("saved")
+      } catch (error) {
+        console.error("Error saving checklist:", error)
+        setStatus("offline")
+      }
+    },
+    [user, weekKey, checklists, supabase]
+  )
+
   // Sign out
   const signOut = useCallback(async () => {
     await supabase.auth.signOut()
     setUser(null)
     setWeekData({})
+    setChecklists({})
   }, [supabase.auth])
 
   return {
@@ -338,8 +454,11 @@ export function usePlannerData(
     status,
     weekData,
     events,
+    checklists,
+    weatherData,
     saveTask,
     saveGoals,
+    saveChecklist,
     clearWeek,
     signOut,
   }

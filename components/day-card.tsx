@@ -1,7 +1,16 @@
 "use client"
 
-import { Target, Sparkles } from "lucide-react"
-import { useRef, useEffect } from "react"
+import { Target, Sparkles, ListTodo } from "lucide-react"
+import { useRef, useEffect, useState } from "react"
+import { DayChecklist, ChecklistItem } from "./day-checklist"
+import { WeatherIcons, WeatherData } from "./weather-display"
+import { Button } from "@/components/ui/button"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 
 interface DayCardProps {
   slot: { id: string; label: string; fullLabel: string }
@@ -13,6 +22,9 @@ interface DayCardProps {
   isToday: boolean
   isGoals: boolean
   tags: string[]
+  checklist?: ChecklistItem[]
+  onChecklistUpdate?: (items: ChecklistItem[]) => void
+  weather?: WeatherData | null
 }
 
 const MONTHS = [
@@ -30,8 +42,12 @@ export function DayCard({
   isToday,
   isGoals,
   tags,
+  checklist = [],
+  onChecklistUpdate,
+  weather,
 }: DayCardProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [isAddingTask, setIsAddingTask] = useState(false)
 
   // Auto-resize textarea
   useEffect(() => {
@@ -45,6 +61,13 @@ export function DayCard({
   const formatDate = (d: Date) => {
     return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
   }
+
+  const handleChecklistChange = (items: ChecklistItem[]) => {
+    onChecklistUpdate?.(items)
+  }
+
+  const completedCount = checklist.filter((item) => item.completed).length
+  const totalCount = checklist.length
 
   return (
     <div
@@ -98,7 +121,12 @@ export function DayCard({
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-3">
+            {/* Weather Icons */}
+            {weather && !isGoals && (
+              <WeatherIcons weather={weather} compact />
+            )}
+
             {date && !isGoals && (
               <span className="text-[10px] text-muted-foreground">
                 {formatDate(date)}
@@ -133,14 +161,56 @@ export function DayCard({
             rows={3}
             spellCheck={false}
           />
+
+          {/* Checklist */}
+          {!isGoals && (
+            <DayChecklist
+              items={checklist}
+              onItemsChange={handleChecklistChange}
+              isAdding={isAddingTask}
+              onAddingChange={setIsAddingTask}
+            />
+          )}
         </div>
 
-        {/* Character count indicator */}
-        {content.length > 0 && (
-          <div className="px-4 pb-2 flex justify-end">
-            <span className="text-[10px] text-muted-foreground/50 tabular-nums">{content.length}</span>
+        {/* Footer with actions and counts */}
+        <div className="px-4 pb-3 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            {/* Add Task Button */}
+            {!isGoals && (
+              <TooltipProvider delayDuration={200}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs gap-1"
+                      onClick={() => setIsAddingTask(true)}
+                    >
+                      <ListTodo className="w-3.5 h-3.5" />
+                      <span className="hidden sm:inline">Add Task</span>
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">
+                    <p className="text-xs">Add a checklist task</p>
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+            )}
+
+            {/* Checklist progress */}
+            {totalCount > 0 && (
+              <span className="text-[10px] text-muted-foreground">
+                {completedCount}/{totalCount} tasks
+              </span>
+            )}
           </div>
-        )}
+
+          {/* Character count indicator */}
+          {content.length > 0 && (
+            <span className="text-[10px] text-muted-foreground/50 tabular-nums">{content.length}</span>
+          )}
+        </div>
       </div>
     </div>
   )
