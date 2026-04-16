@@ -10,9 +10,10 @@ import { StatsPanel } from "@/components/stats-panel"
 import { QuickActions } from "@/components/quick-actions"
 import { StatusIndicator } from "@/components/status-indicator"
 import { usePlannerData } from "@/hooks/use-planner-data"
-import { Calendar, BarChart3, Sparkles, Zap, LogIn, LogOut, User, CloudSun } from "lucide-react"
+import { Calendar, BarChart3, Sparkles, Zap, LogIn, LogOut, User, CloudSun, CalendarDays } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { WeatherTab } from "@/components/weather-tab"
+import { FocusedDayView } from "@/components/focused-day-view"
 import Link from "next/link"
 
 const CATEGORIES = [
@@ -96,6 +97,7 @@ export default function PlannerPage() {
   const [calendarViewDate, setCalendarViewDate] = useState(new Date(currentWeekStart))
   const [showStats, setShowStats] = useState(false)
   const [showWeather, setShowWeather] = useState(false)
+  const [focusedDate, setFocusedDate] = useState<Date | null>(null)
 
   const {
     user,
@@ -150,6 +152,41 @@ export default function PlannerPage() {
     setCurrentWeekStart(getWeekStartDate(date))
     setShowCalendar(false)
   }, [])
+
+  const handleOpenFocusedDay = useCallback(() => {
+    setFocusedDate(new Date(TODAY))
+    setShowCalendar(false)
+    setShowStats(false)
+    setShowWeather(false)
+  }, [])
+
+  const handleFocusedDayPrev = useCallback(() => {
+    if (!focusedDate) return
+    const prevDate = new Date(focusedDate)
+    prevDate.setDate(prevDate.getDate() - 1)
+    if (prevDate >= MIN_DATE) {
+      setFocusedDate(prevDate)
+      // Update week if needed
+      const newWeekStart = getWeekStartDate(prevDate)
+      if (newWeekStart.getTime() !== currentWeekStart.getTime()) {
+        setCurrentWeekStart(newWeekStart)
+      }
+    }
+  }, [focusedDate, currentWeekStart])
+
+  const handleFocusedDayNext = useCallback(() => {
+    if (!focusedDate) return
+    const nextDate = new Date(focusedDate)
+    nextDate.setDate(nextDate.getDate() + 1)
+    if (nextDate <= MAX_DATE) {
+      setFocusedDate(nextDate)
+      // Update week if needed
+      const newWeekStart = getWeekStartDate(nextDate)
+      if (newWeekStart.getTime() !== currentWeekStart.getTime()) {
+        setCurrentWeekStart(newWeekStart)
+      }
+    }
+  }, [focusedDate, currentWeekStart])
 
   const canGoPrev = useMemo(() => {
     const prevWeekStart = new Date(currentWeekStart)
@@ -239,6 +276,15 @@ export default function PlannerPage() {
                   </Button>
                 </Link>
               )}
+
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleOpenFocusedDay}
+                title="Focus on today"
+              >
+                <CalendarDays className="w-5 h-5" />
+              </Button>
 
               <Button
                 variant="ghost"
@@ -412,6 +458,34 @@ export default function PlannerPage() {
           }
         }}
       />
+
+      {/* Focused Day View */}
+      {focusedDate && (() => {
+        const dayOfWeek = focusedDate.getDay()
+        const slotIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+        const slotId = DAYS_OF_WEEK[slotIndex].id
+        const focusedContent = weekData[slotId] ?? ""
+        const dateKey = `${focusedDate.getFullYear()}-${String(focusedDate.getMonth() + 1).padStart(2, "0")}-${String(focusedDate.getDate()).padStart(2, "0")}`
+        const focusedChecklist = checklists[dateKey] || []
+        const focusedWeather = weatherData[dateKey] || null
+
+        return (
+          <FocusedDayView
+            date={focusedDate}
+            content={focusedContent}
+            onUpdate={(val) => saveTask(slotId, val, focusedDate)}
+            categoryColor={currentCategory.color}
+            checklist={focusedChecklist}
+            onChecklistUpdate={(items) => saveChecklist(dateKey, items)}
+            weather={focusedWeather}
+            onClose={() => setFocusedDate(null)}
+            onPrevDay={handleFocusedDayPrev}
+            onNextDay={handleFocusedDayNext}
+            canGoPrev={focusedDate > MIN_DATE}
+            canGoNext={focusedDate < MAX_DATE}
+          />
+        )
+      })()}
     </div>
   )
 }
