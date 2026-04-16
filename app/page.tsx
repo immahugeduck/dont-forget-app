@@ -10,6 +10,7 @@ import { StatsPanel } from "@/components/stats-panel"
 import { QuickActions } from "@/components/quick-actions"
 import { StatusIndicator } from "@/components/status-indicator"
 import { usePlannerData } from "@/hooks/use-planner-data"
+import { useWeather } from "@/hooks/use-weather"
 import { Calendar, BarChart3, Sparkles, Zap, LogIn, LogOut, User, CloudSun, CalendarDays } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { WeatherTab } from "@/components/weather-tab"
@@ -105,13 +106,26 @@ export default function PlannerPage() {
     status,
     weekData,
     checklists,
-    weatherData,
     saveTask,
     saveGoals,
     saveChecklist,
     clearWeek,
     signOut,
   } = usePlannerData(currentWeekStart, category)
+
+  const {
+    weatherData,
+    location: weatherLocation,
+    isLoading: isWeatherLoading,
+    error: weatherError,
+    useRealWeather,
+    requestLocation,
+    clearLocation,
+    refresh: refreshWeather,
+  } = useWeather({
+    startDate: MIN_DATE,
+    endDate: MAX_DATE,
+  })
 
   const weekNumber = getWeekNumber(currentWeekStart)
   const weekEndDate = getWeekEndDate(currentWeekStart)
@@ -369,6 +383,13 @@ export default function PlannerPage() {
             <WeatherTab
               currentWeekStart={currentWeekStart}
               weatherData={weatherData}
+              location={weatherLocation}
+              isLoading={isWeatherLoading}
+              error={weatherError}
+              useRealWeather={useRealWeather}
+              onRequestLocation={requestLocation}
+              onClearLocation={clearLocation}
+              onRefresh={refreshWeather}
             />
           </div>
         )}

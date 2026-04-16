@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
 import { ChecklistItem } from "@/components/day-checklist"
-import { WeatherData, generateMockWeather } from "@/components/weather-display"
 
 export interface Task {
   id: string
@@ -62,25 +61,9 @@ export function usePlannerData(
   const [weekData, setWeekData] = useState<Record<string, string>>({})
   const [events, setEvents] = useState<PlannerEvent[]>([])
   const [checklists, setChecklists] = useState<Record<string, ChecklistItem[]>>({})
-  const [weatherData, setWeatherData] = useState<Record<string, WeatherData>>({})
 
   const supabase = createClient()
   const weekKey = formatDateKey(weekStartDate)
-
-  // Generate weather data on mount
-  useEffect(() => {
-    const weather: Record<string, WeatherData> = {}
-    const startDate = new Date(2026, 3, 1) // April 1, 2026
-    const endDate = new Date(2028, 11, 31) // Dec 31, 2028
-    
-    let current = new Date(startDate)
-    while (current <= endDate) {
-      const dateStr = formatDateKey(current)
-      weather[dateStr] = generateMockWeather(dateStr)
-      current = new Date(current.getTime() + 24 * 60 * 60 * 1000)
-    }
-    setWeatherData(weather)
-  }, [])
 
   // Check auth state
   useEffect(() => {
@@ -455,7 +438,6 @@ export function usePlannerData(
     weekData,
     events,
     checklists,
-    weatherData,
     saveTask,
     saveGoals,
     saveChecklist,
