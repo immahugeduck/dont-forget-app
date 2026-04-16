@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo } from "react"
 import { WeekNavigator } from "@/components/week-navigator"
 import { CategoryTabs } from "@/components/category-tabs"
 import { DayCard } from "@/components/day-card"
@@ -9,8 +9,10 @@ import { MonthCalendar } from "@/components/month-calendar"
 import { StatsPanel } from "@/components/stats-panel"
 import { QuickActions } from "@/components/quick-actions"
 import { StatusIndicator } from "@/components/status-indicator"
-import { Calendar, BarChart3, Sparkles, Zap } from "lucide-react"
+import { usePlannerData } from "@/hooks/use-planner-data"
+import { Calendar, BarChart3, Sparkles, Zap, LogIn, LogOut, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import Link from "next/link"
 
 const CATEGORIES = [
   { id: "personal", label: "Personal", color: "#8b5cf6", icon: "user" },
@@ -49,7 +51,7 @@ function getWeekNumber(date: Date): number {
 function getWeekStartDate(date: Date): Date {
   const d = new Date(date)
   const day = d.getDay()
-  const diff = d.getDate() - day + (day === 0 ? -6 : 1) // Adjust when day is Sunday
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1)
   d.setDate(diff)
   d.setHours(0, 0, 0, 0)
   return d
@@ -71,10 +73,6 @@ function getWeekDates(weekStart: Date): Date[] {
   return dates
 }
 
-function formatDateKey(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
-}
-
 function extractTags(text: string): string[] {
   if (!text) return []
   const matches = text.match(/#[a-zA-Z0-9_]+/g)
@@ -92,67 +90,35 @@ function isSameDay(d1: Date, d2: Date): boolean {
 export default function PlannerPage() {
   const [currentWeekStart, setCurrentWeekStart] = useState(() => getWeekStartDate(TODAY))
   const [category, setCategory] = useState<CategoryId>("personal")
-  const [weekData, setWeekData] = useState<Record<string, string>>({})
-  const [status, setStatus] = useState<"saved" | "saving" | "offline">("saved")
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [showCalendar, setShowCalendar] = useState(false)
   const [calendarViewDate, setCalendarViewDate] = useState(new Date(currentWeekStart))
   const [showStats, setShowStats] = useState(false)
-  const [isLoaded, setIsLoaded] = useState(false)
+
+  const {
+    user,
+    isLoading,
+    status,
+    weekData,
+    saveTask,
+    saveGoals,
+    clearWeek,
+    signOut,
+  } = usePlannerData(currentWeekStart, category)
 
   const weekNumber = getWeekNumber(currentWeekStart)
   const weekEndDate = getWeekEndDate(currentWeekStart)
   const weekDates = getWeekDates(currentWeekStart)
 
-  // Storage key based on week start date
-  const storageKey = useMemo(
-    () => `last-one-week-${formatDateKey(currentWeekStart)}-${category}`,
-    [currentWeekStart, category]
-  )
-
-  // Load data from localStorage
-  useEffect(() => {
-    const stored = localStorage.getItem(storageKey)
-    if (stored) {
-      try {
-        setWeekData(JSON.parse(stored))
-      } catch {
-        setWeekData({})
-      }
-    } else {
-      setWeekData({})
-    }
-    setIsLoaded(true)
-  }, [storageKey])
-
-  // Save data with debounce
-  const saveData = useCallback(
-    (data: Record<string, string>) => {
-      setStatus("saving")
-
-      const timeout = setTimeout(() => {
-        try {
-          localStorage.setItem(storageKey, JSON.stringify(data))
-          setStatus("saved")
-        } catch {
-          setStatus("offline")
-        }
-      }, 500)
-
-      return () => clearTimeout(timeout)
-    },
-    [storageKey]
-  )
-
   const handleUpdate = useCallback(
-    (slotId: string, value: string) => {
-      setWeekData((prev) => {
-        const updated = { ...prev, [slotId]: value }
-        saveData(updated)
-        return updated
-      })
+    (slotId: string, value: string, date?: Date) => {
+      if (slotId === "goals") {
+        saveGoals(value)
+      } else if (date) {
+        saveTask(slotId, value, date)
+      }
     },
-    [saveData]
+    [saveTask, saveGoals]
   )
 
   const handlePrevWeek = useCallback(() => {
@@ -213,7 +179,7 @@ export default function PlannerPage() {
 
   const currentCategory = CATEGORIES.find((c) => c.id === category)!
 
-  if (!isLoaded) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
@@ -252,6 +218,23 @@ export default function PlannerPage() {
             <div className="flex items-center gap-2">
               <StatusIndicator status={status} />
 
+              {user ? (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={signOut}
+                  title="Sign out"
+                >
+                  <LogOut className="w-5 h-5" />
+                </Button>
+              ) : (
+                <Link href="/auth/login">
+                  <Button variant="ghost" size="icon" title="Sign in to sync">
+                    <LogIn className="w-5 h-5" />
+                  </Button>
+                </Link>
+              )}
+
               <Button
                 variant="ghost"
                 size="icon"
@@ -276,6 +259,15 @@ export default function PlannerPage() {
               </Button>
             </div>
           </div>
+
+          {/* User badge */}
+          {user && (
+            <div className="flex items-center gap-2 mb-3 px-2 py-1.5 bg-secondary/50 rounded-lg text-sm">
+              <User className="w-4 h-4 text-muted-foreground" />
+              <span className="text-muted-foreground truncate">{user.email}</span>
+              <span className="text-xs text-green-500 ml-auto">Synced</span>
+            </div>
+          )}
 
           {/* Category Tabs */}
           <CategoryTabs categories={CATEGORIES} activeCategory={category} onSelect={setCategory} />
@@ -336,7 +328,7 @@ export default function PlannerPage() {
                 slot={slot}
                 date={slotDate}
                 content={content}
-                onUpdate={(val) => handleUpdate(slot.id, val)}
+                onUpdate={(val) => handleUpdate(slot.id, val, slotDate)}
                 categoryColor={currentCategory.color}
                 isDimmed={!!isDimmed}
                 isToday={isToday}
@@ -361,8 +353,7 @@ export default function PlannerPage() {
         }}
         onClearWeek={() => {
           if (confirm("Clear all entries for this week?")) {
-            setWeekData({})
-            saveData({})
+            clearWeek()
           }
         }}
       />
