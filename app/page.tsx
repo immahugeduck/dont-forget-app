@@ -10,8 +10,11 @@ import { StatsPanel } from "@/components/stats-panel"
 import { QuickActions } from "@/components/quick-actions"
 import { StatusIndicator } from "@/components/status-indicator"
 import { usePlannerData } from "@/hooks/use-planner-data"
-import { Calendar, BarChart3, Sparkles, Zap, LogIn, LogOut, User } from "lucide-react"
+import { useWeather } from "@/hooks/use-weather"
+import { Calendar, BarChart3, Sparkles, Zap, LogIn, LogOut, User, CloudSun, CalendarDays } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { WeatherTab } from "@/components/weather-tab"
+import { FocusedDayView } from "@/components/focused-day-view"
 import Link from "next/link"
 
 const CATEGORIES = [
@@ -94,17 +97,35 @@ export default function PlannerPage() {
   const [showCalendar, setShowCalendar] = useState(false)
   const [calendarViewDate, setCalendarViewDate] = useState(new Date(currentWeekStart))
   const [showStats, setShowStats] = useState(false)
+  const [showWeather, setShowWeather] = useState(false)
+  const [focusedDate, setFocusedDate] = useState<Date | null>(null)
 
   const {
     user,
     isLoading,
     status,
     weekData,
+    checklists,
     saveTask,
     saveGoals,
+    saveChecklist,
     clearWeek,
     signOut,
   } = usePlannerData(currentWeekStart, category)
+
+  const {
+    weatherData,
+    location: weatherLocation,
+    isLoading: isWeatherLoading,
+    error: weatherError,
+    useRealWeather,
+    requestLocation,
+    clearLocation,
+    refresh: refreshWeather,
+  } = useWeather({
+    startDate: MIN_DATE,
+    endDate: MAX_DATE,
+  })
 
   const weekNumber = getWeekNumber(currentWeekStart)
   const weekEndDate = getWeekEndDate(currentWeekStart)
@@ -145,6 +166,41 @@ export default function PlannerPage() {
     setCurrentWeekStart(getWeekStartDate(date))
     setShowCalendar(false)
   }, [])
+
+  const handleOpenFocusedDay = useCallback(() => {
+    setFocusedDate(new Date(TODAY))
+    setShowCalendar(false)
+    setShowStats(false)
+    setShowWeather(false)
+  }, [])
+
+  const handleFocusedDayPrev = useCallback(() => {
+    if (!focusedDate) return
+    const prevDate = new Date(focusedDate)
+    prevDate.setDate(prevDate.getDate() - 1)
+    if (prevDate >= MIN_DATE) {
+      setFocusedDate(prevDate)
+      // Update week if needed
+      const newWeekStart = getWeekStartDate(prevDate)
+      if (newWeekStart.getTime() !== currentWeekStart.getTime()) {
+        setCurrentWeekStart(newWeekStart)
+      }
+    }
+  }, [focusedDate, currentWeekStart])
+
+  const handleFocusedDayNext = useCallback(() => {
+    if (!focusedDate) return
+    const nextDate = new Date(focusedDate)
+    nextDate.setDate(nextDate.getDate() + 1)
+    if (nextDate <= MAX_DATE) {
+      setFocusedDate(nextDate)
+      // Update week if needed
+      const newWeekStart = getWeekStartDate(nextDate)
+      if (newWeekStart.getTime() !== currentWeekStart.getTime()) {
+        setCurrentWeekStart(newWeekStart)
+      }
+    }
+  }, [focusedDate, currentWeekStart])
 
   const canGoPrev = useMemo(() => {
     const prevWeekStart = new Date(currentWeekStart)
@@ -238,8 +294,38 @@ export default function PlannerPage() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setShowStats(!showStats)}
+                onClick={handleOpenFocusedDay}
+                title="Focus on today"
+              >
+                <CalendarDays className="w-5 h-5" />
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  setShowWeather(!showWeather)
+                  if (showWeather) return
+                  setShowStats(false)
+                  setShowCalendar(false)
+                }}
+                className={showWeather ? "bg-secondary" : ""}
+                title="Weather"
+              >
+                <CloudSun className="w-5 h-5" />
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
+                  setShowStats(!showStats)
+                  if (showStats) return
+                  setShowWeather(false)
+                  setShowCalendar(false)
+                }}
                 className={showStats ? "bg-secondary" : ""}
+                title="Stats"
               >
                 <BarChart3 className="w-5 h-5" />
               </Button>
@@ -251,9 +337,14 @@ export default function PlannerPage() {
                   setShowCalendar(!showCalendar)
                   if (!showCalendar) {
                     setCalendarViewDate(new Date(currentWeekStart))
+                  } else {
+                    return
                   }
+                  setShowStats(false)
+                  setShowWeather(false)
                 }}
                 className={showCalendar ? "bg-secondary" : ""}
+                title="Calendar"
               >
                 <Calendar className="w-5 h-5" />
               </Button>
@@ -284,6 +375,23 @@ export default function PlannerPage() {
             onMonthChange={setCalendarViewDate}
             onClose={() => setShowCalendar(false)}
           />
+        )}
+
+        {/* Weather Tab */}
+        {showWeather && (
+          <div className="mb-4 p-4 bg-card rounded-2xl border border-border">
+            <WeatherTab
+              currentWeekStart={currentWeekStart}
+              weatherData={weatherData}
+              location={weatherLocation}
+              isLoading={isWeatherLoading}
+              error={weatherError}
+              useRealWeather={useRealWeather}
+              onRequestLocation={requestLocation}
+              onClearLocation={clearLocation}
+              onRefresh={refreshWeather}
+            />
+          </div>
         )}
 
         {/* Stats Panel */}
@@ -321,6 +429,13 @@ export default function PlannerPage() {
             const isGoals = slot.id === "goals"
             const slotDate = isGoals ? undefined : weekDates[index]
             const isToday = slotDate ? isSameDay(slotDate, TODAY) : false
+            
+            // Get date key for checklist and weather
+            const dateKey = slotDate 
+              ? `${slotDate.getFullYear()}-${String(slotDate.getMonth() + 1).padStart(2, "0")}-${String(slotDate.getDate()).padStart(2, "0")}`
+              : ""
+            const dayChecklist = dateKey ? checklists[dateKey] || [] : []
+            const dayWeather = dateKey ? weatherData[dateKey] || null : null
 
             return (
               <DayCard
@@ -334,6 +449,13 @@ export default function PlannerPage() {
                 isToday={isToday}
                 isGoals={isGoals}
                 tags={tags}
+                checklist={dayChecklist}
+                onChecklistUpdate={(items) => {
+                  if (dateKey) {
+                    saveChecklist(dateKey, items)
+                  }
+                }}
+                weather={dayWeather}
               />
             )
           })}
@@ -357,6 +479,34 @@ export default function PlannerPage() {
           }
         }}
       />
+
+      {/* Focused Day View */}
+      {focusedDate && (() => {
+        const dayOfWeek = focusedDate.getDay()
+        const slotIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+        const slotId = DAYS_OF_WEEK[slotIndex].id
+        const focusedContent = weekData[slotId] ?? ""
+        const dateKey = `${focusedDate.getFullYear()}-${String(focusedDate.getMonth() + 1).padStart(2, "0")}-${String(focusedDate.getDate()).padStart(2, "0")}`
+        const focusedChecklist = checklists[dateKey] || []
+        const focusedWeather = weatherData[dateKey] || null
+
+        return (
+          <FocusedDayView
+            date={focusedDate}
+            content={focusedContent}
+            onUpdate={(val) => saveTask(slotId, val, focusedDate)}
+            categoryColor={currentCategory.color}
+            checklist={focusedChecklist}
+            onChecklistUpdate={(items) => saveChecklist(dateKey, items)}
+            weather={focusedWeather}
+            onClose={() => setFocusedDate(null)}
+            onPrevDay={handleFocusedDayPrev}
+            onNextDay={handleFocusedDayNext}
+            canGoPrev={focusedDate > MIN_DATE}
+            canGoNext={focusedDate < MAX_DATE}
+          />
+        )
+      })()}
     </div>
   )
 }
