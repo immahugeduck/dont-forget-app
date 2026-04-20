@@ -39,9 +39,9 @@ const GOAL_SLOT = { id: "goals", label: "Goals", fullLabel: "Weekly Goals" }
 const ALL_SLOTS = [...DAYS_OF_WEEK, GOAL_SLOT]
 
 // Calendar boundaries
-const MIN_DATE = new Date(2026, 3, 1) // April 1, 2026
-const MAX_DATE = new Date(2028, 11, 31) // December 31, 2028
-const TODAY = new Date(2026, 3, 15) // April 15, 2026 (current date)
+const MIN_DATE = new Date(2020, 0, 1) // January 1, 2020
+const MAX_DATE = new Date(2030, 11, 31) // December 31, 2030
+const TODAY = new Date() // Current date
 
 function getWeekNumber(date: Date): number {
   const temp = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
