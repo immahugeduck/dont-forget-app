@@ -48,6 +48,12 @@ export function DayCard({
 }: DayCardProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isAddingTask, setIsAddingTask] = useState(false)
+  const [localContent, setLocalContent] = useState(content)
+
+  // Sync local content when prop changes (e.g., data loaded from server)
+  useEffect(() => {
+    setLocalContent(content)
+  }, [content])
 
   // Auto-resize textarea
   useEffect(() => {
@@ -56,7 +62,14 @@ export function DayCard({
       el.style.height = "auto"
       el.style.height = `${el.scrollHeight}px`
     }
-  }, [content])
+  }, [localContent])
+
+  // Save on blur (when user clicks out of the textarea)
+  const handleBlur = () => {
+    if (localContent !== content) {
+      onUpdate(localContent)
+    }
+  }
 
   const formatDate = (d: Date) => {
     return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`
@@ -156,8 +169,9 @@ export function DayCard({
             placeholder={
               isGoals ? "Set your goals for this week... #goals" : `Plan your ${slot.label.toLowerCase()}... #tags`
             }
-            value={content}
-            onChange={(e) => onUpdate(e.target.value)}
+            value={localContent}
+            onChange={(e) => setLocalContent(e.target.value)}
+            onBlur={handleBlur}
             rows={3}
             spellCheck={false}
           />
@@ -207,8 +221,8 @@ export function DayCard({
           </div>
 
           {/* Character count indicator */}
-          {content.length > 0 && (
-            <span className="text-[10px] text-muted-foreground/50 tabular-nums">{content.length}</span>
+          {localContent.length > 0 && (
+            <span className="text-[10px] text-muted-foreground/50 tabular-nums">{localContent.length}</span>
           )}
         </div>
       </div>
