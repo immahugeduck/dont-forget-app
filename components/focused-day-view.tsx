@@ -80,7 +80,7 @@ export function FocusedDayView({
   const dayName = DAYS_OF_WEEK[date.getDay()]
   const formattedDate = `${MONTHS[date.getMonth()]} ${date.getDate()}, ${date.getFullYear()}`
   const isToday = (() => {
-    const today = new Date(2026, 3, 15) // April 15, 2026
+    const today = new Date() // Current date
     return date.getDate() === today.getDate() &&
            date.getMonth() === today.getMonth() &&
            date.getFullYear() === today.getFullYear()

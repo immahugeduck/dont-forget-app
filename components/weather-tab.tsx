@@ -77,7 +77,7 @@ export function WeatherTab({
     return { date, dateStr, weather }
   })
 
-  const todayStr = format(new Date(2026, 3, 15), "yyyy-MM-dd") // April 15, 2026
+  const todayStr = format(new Date(), "yyyy-MM-dd") // Current date
   const todayWeather = weatherData[todayStr] || generateMockWeather(todayStr)
   const MainIcon = conditionIcons[todayWeather.conditions[0] as WeatherCondition] || CloudSun
 

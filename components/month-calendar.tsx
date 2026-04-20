@@ -42,7 +42,7 @@ export function MonthCalendar({
   // Adjust so Monday is first (0 = Monday, 6 = Sunday)
   const adjustedFirstDay = firstDayOfMonth === 0 ? 6 : firstDayOfMonth - 1
 
-  const today = new Date(2026, 3, 15) // April 15, 2026
+  const today = new Date() // Current date
   const isCurrentMonth = month === today.getMonth() && year === today.getFullYear()
 
   const getWeekNumber = (date: Date): number => {
@@ -55,16 +55,16 @@ export function MonthCalendar({
 
   const handlePrevMonth = useCallback(() => {
     const newDate = new Date(year, month - 1, 1)
-    // Don't go before April 2026
-    if (newDate >= new Date(2026, 3, 1)) {
+    // Don't go before January 2020
+    if (newDate >= new Date(2020, 0, 1)) {
       onMonthChange(newDate)
     }
   }, [year, month, onMonthChange])
 
   const handleNextMonth = useCallback(() => {
     const newDate = new Date(year, month + 1, 1)
-    // Don't go past December 2028
-    if (newDate <= new Date(2028, 11, 1)) {
+    // Don't go past December 2030
+    if (newDate <= new Date(2030, 11, 1)) {
       onMonthChange(newDate)
     }
   }, [year, month, onMonthChange])
@@ -126,8 +126,8 @@ export function MonthCalendar({
 
   const calendarRows = generateCalendarRows()
 
-  const canGoPrev = new Date(year, month - 1, 1) >= new Date(2026, 3, 1)
-  const canGoNext = new Date(year, month + 1, 1) <= new Date(2028, 11, 1)
+  const canGoPrev = new Date(year, month - 1, 1) >= new Date(2020, 0, 1)
+  const canGoNext = new Date(year, month + 1, 1) <= new Date(2030, 11, 1)
 
   return (
     <div className="bg-card rounded-2xl border border-border p-4 mb-4 animate-in fade-in slide-in-from-top-2 duration-300">
