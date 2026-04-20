@@ -46,6 +46,12 @@ export function FocusedDayView({
 }: FocusedDayViewProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isAddingTask, setIsAddingTask] = useState(false)
+  const [localContent, setLocalContent] = useState(content)
+
+  // Sync local content when prop changes (e.g., navigating to different day)
+  useEffect(() => {
+    setLocalContent(content)
+  }, [content])
 
   // Auto-resize textarea
   useEffect(() => {
@@ -54,7 +60,14 @@ export function FocusedDayView({
       el.style.height = "auto"
       el.style.height = `${Math.max(el.scrollHeight, 200)}px`
     }
-  }, [content])
+  }, [localContent])
+
+  // Save on blur (when user clicks out of the textarea)
+  const handleBlur = () => {
+    if (localContent !== content) {
+      onUpdate(localContent)
+    }
+  }
 
   // Focus textarea on mount
   useEffect(() => {
@@ -179,8 +192,9 @@ export function FocusedDayView({
                 ref={textareaRef}
                 className="w-full bg-transparent border-none resize-none focus:outline-none focus:ring-0 text-foreground text-base leading-relaxed placeholder:text-muted-foreground/50"
                 placeholder="What's on the agenda today? Use #tags to organize..."
-                value={content}
-                onChange={(e) => onUpdate(e.target.value)}
+                value={localContent}
+                onChange={(e) => setLocalContent(e.target.value)}
+                onBlur={handleBlur}
                 rows={6}
                 spellCheck={false}
               />
