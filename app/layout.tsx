@@ -8,7 +8,7 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-sans" })
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-mono" })
 
 export const metadata: Metadata = {
-  title: "Last-One | Weekly Planner",
+  title: "Don't Forget | Weekly Planner",
   description: "Your premium weekly planning companion",
   generator: "v0.app",
   manifest: "/manifest.json",

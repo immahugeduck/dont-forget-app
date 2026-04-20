@@ -33,14 +33,10 @@ export default function Page() {
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
-        options: {
-          emailRedirectTo:
-            process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL ??
-            `${window.location.origin}/auth/callback`,
-        },
       })
       if (error) throw error
       router.push('/')
+      router.refresh()
     } catch (error: unknown) {
       setError(error instanceof Error ? error.message : 'An error occurred')
     } finally {
@@ -56,7 +52,7 @@ export default function Page() {
             <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
               <Zap className="w-5 h-5 text-primary-foreground" />
             </div>
-            <span className="text-xl font-bold">Last-One</span>
+            <span className="text-xl font-bold">Don&apos;t Forget</span>
           </div>
           <Card>
             <CardHeader>

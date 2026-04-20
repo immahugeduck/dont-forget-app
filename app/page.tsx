@@ -264,7 +264,7 @@ export default function PlannerPage() {
                 <Zap className="w-5 h-5 text-background" />
               </div>
               <div>
-                <h1 className="text-lg font-bold tracking-tight">Last-One</h1>
+                <h1 className="text-lg font-bold tracking-tight">Don&apos;t Forget</h1>
                 <p className="text-xs text-muted-foreground">
                   Week {weekNumber} · {currentWeekStart.getFullYear()}
                 </p>
