@@ -114,7 +114,7 @@ export function NotificationSettings({ onClose }: NotificationSettingsProps) {
               <Clock className="w-4 h-4 text-muted-foreground flex-shrink-0" />
               <div className="flex-1">
                 <p className="text-sm font-medium">Reminder time</p>
-                <p className="text-xs text-muted-foreground">Sent daily at this time (UTC)</p>
+                <p className="text-xs text-muted-foreground">Daily nudge at this time (UTC — adjust for your timezone)</p>
               </div>
               <input
                 type="time"

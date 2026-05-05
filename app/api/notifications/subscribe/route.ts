@@ -1,6 +1,15 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 
+/** Shape of the serialized PushSubscription received from the client */
+interface SerializedPushSubscription {
+  endpoint: string
+  keys?: {
+    p256dh?: string
+    auth?: string
+  }
+}
+
 export async function POST(request: Request) {
   const supabase = await createClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -9,7 +18,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  let body: { subscription: PushSubscription; reminderTime?: string }
+  let body: { subscription: SerializedPushSubscription; reminderTime?: string }
   try {
     body = await request.json()
   } catch {
@@ -22,9 +31,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing subscription endpoint" }, { status: 400 })
   }
 
-  const keys = (subscription as unknown as { keys?: { p256dh?: string; auth?: string } }).keys
-  const p256dh = keys?.p256dh
-  const auth = keys?.auth
+  const p256dh = subscription.keys?.p256dh
+  const auth = subscription.keys?.auth
 
   if (!p256dh || !auth) {
     return NextResponse.json({ error: "Missing subscription keys" }, { status: 400 })

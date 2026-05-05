@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS public.push_subscriptions (
   endpoint TEXT NOT NULL,
   p256dh TEXT NOT NULL,
   auth TEXT NOT NULL,
+  -- reminder_time stores the user's preferred daily reminder time in HH:MM format (UTC, 24-hour clock)
   reminder_time TEXT NOT NULL DEFAULT '08:00',
   enabled BOOLEAN NOT NULL DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW(),

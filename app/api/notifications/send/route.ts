@@ -38,20 +38,23 @@ export async function GET(request: Request) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   )
 
-  // Get current UTC hour to match reminder times
+  // Get current UTC hour — the cron runs at minute 0 of each hour (schedule: "0 * * * *"),
+  // so we notify all subscriptions whose reminder_time falls within this UTC hour.
   const nowUTC = new Date()
   const currentHour = nowUTC.getUTCHours()
-  const currentMinute = nowUTC.getUTCMinutes()
-  const currentTimeStr = `${String(currentHour).padStart(2, "0")}:${String(currentMinute).padStart(2, "0")}`
 
-  // Fetch enabled subscriptions whose reminder_time matches the current UTC hour
-  // We match on the hour portion to be flexible with scheduling
-  const targetHour = `${String(currentHour).padStart(2, "0")}:`
+  /** Format a UTC hour (and optional minute) as "HH:MM" */
+  const formatUTCTime = (h: number, m = 0) =>
+    `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
+
+  const currentTimeStr = formatUTCTime(currentHour, nowUTC.getUTCMinutes())
+  const targetHourPrefix = `${String(currentHour).padStart(2, "0")}:`
+
   const { data: subscriptions, error } = await supabase
     .from("push_subscriptions")
     .select("*")
     .eq("enabled", true)
-    .like("reminder_time", `${targetHour}%`)
+    .like("reminder_time", `${targetHourPrefix}%`)
 
   if (error) {
     console.error("Error fetching push subscriptions:", error)
