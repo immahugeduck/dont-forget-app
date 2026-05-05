@@ -39,6 +39,7 @@
     "@radix-ui/react-tooltip": "1.1.6",
     "@supabase/ssr": "^0.10.2",
     "@supabase/supabase-js": "^2.103.3",
+    "@types/web-push": "^3.6.4",
     "@vercel/analytics": "latest",
     "autoprefixer": "^10.4.20",
     "class-variance-authority": "^0.7.1",
@@ -60,6 +61,7 @@
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
     "vaul": "^1.1.2",
+    "web-push": "^3.6.7",
     "zod": "3.25.76"
   },
   "devDependencies": {

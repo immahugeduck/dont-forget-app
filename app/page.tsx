@@ -11,10 +11,11 @@ import { QuickActions } from "@/components/quick-actions"
 import { StatusIndicator } from "@/components/status-indicator"
 import { usePlannerData } from "@/hooks/use-planner-data"
 import { useWeather } from "@/hooks/use-weather"
-import { Calendar, BarChart3, Sparkles, Zap, LogIn, LogOut, User, CloudSun, CalendarDays } from "lucide-react"
+import { Calendar, BarChart3, Sparkles, Zap, LogIn, LogOut, User, CloudSun, CalendarDays, Bell } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { WeatherTab } from "@/components/weather-tab"
 import { FocusedDayView } from "@/components/focused-day-view"
+import { NotificationSettings } from "@/components/notification-settings"
 import Link from "next/link"
 
 const CATEGORIES = [
@@ -98,6 +99,7 @@ export default function PlannerPage() {
   const [calendarViewDate, setCalendarViewDate] = useState(new Date(currentWeekStart))
   const [showStats, setShowStats] = useState(false)
   const [showWeather, setShowWeather] = useState(false)
+  const [showNotifications, setShowNotifications] = useState(false)
   const [focusedDate, setFocusedDate] = useState<Date | null>(null)
 
   const {
@@ -172,6 +174,7 @@ export default function PlannerPage() {
     setShowCalendar(false)
     setShowStats(false)
     setShowWeather(false)
+    setShowNotifications(false)
   }, [])
 
   const handleFocusedDayPrev = useCallback(() => {
@@ -304,10 +307,27 @@ export default function PlannerPage() {
                 variant="ghost"
                 size="icon"
                 onClick={() => {
+                  setShowNotifications(!showNotifications)
+                  if (showNotifications) return
+                  setShowWeather(false)
+                  setShowStats(false)
+                  setShowCalendar(false)
+                }}
+                className={showNotifications ? "bg-secondary" : ""}
+                title="Notifications"
+              >
+                <Bell className="w-5 h-5" />
+              </Button>
+
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={() => {
                   setShowWeather(!showWeather)
                   if (showWeather) return
                   setShowStats(false)
                   setShowCalendar(false)
+                  setShowNotifications(false)
                 }}
                 className={showWeather ? "bg-secondary" : ""}
                 title="Weather"
@@ -323,6 +343,7 @@ export default function PlannerPage() {
                   if (showStats) return
                   setShowWeather(false)
                   setShowCalendar(false)
+                  setShowNotifications(false)
                 }}
                 className={showStats ? "bg-secondary" : ""}
                 title="Stats"
@@ -342,6 +363,7 @@ export default function PlannerPage() {
                   }
                   setShowStats(false)
                   setShowWeather(false)
+                  setShowNotifications(false)
                 }}
                 className={showCalendar ? "bg-secondary" : ""}
                 title="Calendar"
@@ -403,6 +425,11 @@ export default function PlannerPage() {
             wordCount={stats.wordCount}
             categoryColor={currentCategory.color}
           />
+        )}
+
+        {/* Notification Settings */}
+        {showNotifications && (
+          <NotificationSettings onClose={() => setShowNotifications(false)} />
         )}
 
         {/* Week Navigator */}
