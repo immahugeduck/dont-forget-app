@@ -11,6 +11,7 @@ import { QuickActions } from "@/components/quick-actions"
 import { StatusIndicator } from "@/components/status-indicator"
 import { usePlannerData } from "@/hooks/use-planner-data"
 import { useWeather } from "@/hooks/use-weather"
+import { useNotifications } from "@/hooks/use-notifications"
 import { Calendar, BarChart3, Sparkles, Zap, LogIn, LogOut, User, CloudSun, CalendarDays, Bell } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { WeatherTab } from "@/components/weather-tab"
@@ -108,9 +109,12 @@ export default function PlannerPage() {
     status,
     weekData,
     checklists,
+    reminders,
     saveTask,
     saveGoals,
     saveChecklist,
+    saveReminder,
+    removeReminder,
     clearWeek,
     signOut,
   } = usePlannerData(currentWeekStart, category)
@@ -128,6 +132,8 @@ export default function PlannerPage() {
     startDate: MIN_DATE,
     endDate: MAX_DATE,
   })
+
+  const { isSubscribed: notificationsEnabled } = useNotifications()
 
   const weekNumber = getWeekNumber(currentWeekStart)
   const weekEndDate = getWeekEndDate(currentWeekStart)
@@ -483,6 +489,10 @@ export default function PlannerPage() {
                   }
                 }}
                 weather={dayWeather}
+                reminders={reminders}
+                onReminderSet={saveReminder}
+                onReminderRemove={removeReminder}
+                notificationsEnabled={notificationsEnabled}
               />
             )
           })}
@@ -531,6 +541,10 @@ export default function PlannerPage() {
             onNextDay={handleFocusedDayNext}
             canGoPrev={focusedDate > MIN_DATE}
             canGoNext={focusedDate < MAX_DATE}
+            reminders={reminders}
+            onReminderSet={saveReminder}
+            onReminderRemove={removeReminder}
+            notificationsEnabled={notificationsEnabled}
           />
         )
       })()}

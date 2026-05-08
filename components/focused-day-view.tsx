@@ -3,7 +3,7 @@
 import { X, ChevronLeft, ChevronRight, Sparkles, ListTodo, Sun } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useRef, useEffect, useState } from "react"
-import { DayChecklist, ChecklistItem } from "./day-checklist"
+import { DayChecklist, ChecklistItem, TaskReminder } from "./day-checklist"
 import { WeatherIcons, WeatherData } from "./weather-display"
 
 interface FocusedDayViewProps {
@@ -19,6 +19,10 @@ interface FocusedDayViewProps {
   onNextDay: () => void
   canGoPrev: boolean
   canGoNext: boolean
+  reminders?: Record<string, TaskReminder>
+  onReminderSet?: (checklistId: string, reminderDatetime: string) => void
+  onReminderRemove?: (checklistId: string) => void
+  notificationsEnabled?: boolean
 }
 
 const MONTHS = [
@@ -43,6 +47,10 @@ export function FocusedDayView({
   onNextDay,
   canGoPrev,
   canGoNext,
+  reminders,
+  onReminderSet,
+  onReminderRemove,
+  notificationsEnabled,
 }: FocusedDayViewProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isAddingTask, setIsAddingTask] = useState(false)
@@ -221,6 +229,11 @@ export function FocusedDayView({
                 onItemsChange={onChecklistUpdate}
                 isAdding={isAddingTask}
                 onAddingChange={setIsAddingTask}
+                date={date}
+                reminders={reminders}
+                onReminderSet={onReminderSet}
+                onReminderRemove={onReminderRemove}
+                notificationsEnabled={notificationsEnabled}
               />
 
               {!isAddingTask && (

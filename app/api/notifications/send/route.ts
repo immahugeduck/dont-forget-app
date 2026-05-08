@@ -19,6 +19,19 @@ interface PushSubscriptionRow {
   enabled: boolean
 }
 
+interface TaskReminderRow {
+  id: string
+  user_id: string
+  checklist_id: string
+  reminder_datetime: string
+  sent: boolean
+  checklist?: {
+    id: string
+    item_text: string
+    date: string
+  }
+}
+
 export async function GET(request: Request) {
   // Verify cron secret to prevent unauthorized calls
   const authHeader = request.headers.get("authorization")
@@ -99,9 +112,101 @@ export async function GET(request: Request) {
   const succeeded = results.filter((r) => r.status === "fulfilled" && (r.value as { success: boolean }).success).length
   const failed = results.length - succeeded
 
+  // --- Task Reminders ---
+  // Find all task reminders due within the current minute window (or in the past but not sent)
+  const { data: taskReminders, error: taskRemindersError } = await supabase
+    .from("task_reminders")
+    .select(`
+      *,
+      checklist:checklists(id, item_text, date)
+    `)
+    .eq("sent", false)
+    .lte("reminder_datetime", nowUTC.toISOString())
+
+  if (taskRemindersError) {
+    console.error("Error fetching task reminders:", taskRemindersError)
+  }
+
+  let taskRemindersSent = 0
+  let taskRemindersFailed = 0
+
+  if (taskReminders && taskReminders.length > 0) {
+    // Group reminders by user to send one notification per task
+    for (const reminder of taskReminders as TaskReminderRow[]) {
+      // Get this user's push subscriptions
+      const { data: userSubs } = await supabase
+        .from("push_subscriptions")
+        .select("*")
+        .eq("user_id", reminder.user_id)
+        .eq("enabled", true)
+
+      if (!userSubs || userSubs.length === 0) {
+        continue
+      }
+
+      const taskText = reminder.checklist?.item_text ?? "Task"
+      const taskDate = reminder.checklist?.date
+        ? new Date(reminder.checklist.date).toLocaleDateString("en-US", {
+            weekday: "short",
+            month: "short",
+            day: "numeric",
+          })
+        : ""
+
+      const taskPayload = JSON.stringify({
+        title: "Task Reminder",
+        body: `${taskText}${taskDate ? ` — ${taskDate}` : ""}`,
+        url: "/",
+      })
+
+      // Send to all of the user's subscriptions
+      const taskResults = await Promise.allSettled(
+        (userSubs as PushSubscriptionRow[]).map(async (sub) => {
+          const pushSubscription = {
+            endpoint: sub.endpoint,
+            keys: {
+              p256dh: sub.p256dh,
+              auth: sub.auth,
+            },
+          }
+
+          try {
+            await webpush.sendNotification(pushSubscription, taskPayload)
+            return { success: true }
+          } catch (err: unknown) {
+            const webPushError = err as { statusCode?: number }
+            if (webPushError?.statusCode === 410 || webPushError?.statusCode === 404) {
+              await supabase.from("push_subscriptions").delete().eq("id", sub.id)
+            }
+            return { success: false, error: String(err) }
+          }
+        })
+      )
+
+      const anySent = taskResults.some(
+        (r) => r.status === "fulfilled" && (r.value as { success: boolean }).success
+      )
+
+      if (anySent) {
+        // Mark this reminder as sent
+        await supabase
+          .from("task_reminders")
+          .update({ sent: true })
+          .eq("id", reminder.id)
+        taskRemindersSent++
+      } else {
+        taskRemindersFailed++
+      }
+    }
+  }
+
   return NextResponse.json({
-    message: `Sent ${succeeded} notifications, ${failed} failed`,
+    message: `Sent ${succeeded} daily notifications, ${failed} failed. Task reminders: ${taskRemindersSent} sent, ${taskRemindersFailed} failed`,
     time: currentTimeStr,
     total: results.length,
+    taskReminders: {
+      sent: taskRemindersSent,
+      failed: taskRemindersFailed,
+    },
   })
 }
