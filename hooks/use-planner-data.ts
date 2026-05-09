@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { createClient } from "@/lib/supabase/client"
 import type { User } from "@supabase/supabase-js"
-import { ChecklistItem } from "@/components/day-checklist"
+import { ChecklistItem, TaskReminder } from "@/components/day-checklist"
 
 export interface Task {
   id: string
@@ -50,6 +50,7 @@ export interface ChecklistRow {
   completed: boolean
   position: number
   category: string
+  due_time: string | null
   created_at: string
   updated_at: string
 }
@@ -68,6 +69,7 @@ export function usePlannerData(
   const [weekData, setWeekData] = useState<Record<string, string>>({})
   const [events, setEvents] = useState<PlannerEvent[]>([])
   const [checklists, setChecklists] = useState<Record<string, ChecklistItem[]>>({})
+  const [reminders, setReminders] = useState<Record<string, TaskReminder>>({})
 
   const supabase = createClient()
   const weekKey = formatDateKey(weekStartDate)
@@ -182,6 +184,7 @@ export function usePlannerData(
 
         if (!checklistsError && checklistsData) {
           const checklistMap: Record<string, ChecklistItem[]> = {}
+          const checklistIds: string[] = []
           checklistsData.forEach((row: ChecklistRow) => {
             if (!checklistMap[row.date]) {
               checklistMap[row.date] = []
@@ -191,9 +194,28 @@ export function usePlannerData(
               text: row.text,
               completed: row.completed,
               order: row.position,
+              due_time: row.due_time,
             })
+            checklistIds.push(row.id)
           })
           setChecklists(checklistMap)
+
+          // Load reminders for these checklists
+          if (checklistIds.length > 0) {
+            const { data: remindersData, error: remindersError } = await supabase
+              .from("task_reminders")
+              .select("*")
+              .eq("user_id", user.id)
+              .in("checklist_id", checklistIds)
+
+            if (!remindersError && remindersData) {
+              const remindersMap: Record<string, TaskReminder> = {}
+              remindersData.forEach((row: TaskReminder) => {
+                remindersMap[row.checklist_id] = row
+              })
+              setReminders(remindersMap)
+            }
+          }
         }
 
         setWeekData(data)
@@ -421,6 +443,7 @@ export function usePlannerData(
                 text: item.text,
                 completed: item.completed,
                 position: item.order,
+                due_time: item.due_time || null,
                 updated_at: new Date().toISOString(),
               })
               .eq("id", item.id)
@@ -436,6 +459,7 @@ export function usePlannerData(
               text: item.text,
               completed: item.completed,
               position: item.order,
+              due_time: item.due_time || null,
               category,
             })
 
@@ -452,12 +476,95 @@ export function usePlannerData(
     [user, weekKey, checklists, supabase, category]
   )
 
+  // Save due time for a checklist item
+  const saveDueTime = useCallback(
+    async (checklistId: string, dueTime: string | null) => {
+      if (!user) return
+
+      try {
+        const { error } = await supabase
+          .from("checklists")
+          .update({ due_time: dueTime, updated_at: new Date().toISOString() })
+          .eq("id", checklistId)
+
+        if (error) throw error
+
+        // Update local state
+        setChecklists((prev) => {
+          const updated = { ...prev }
+          for (const date in updated) {
+            updated[date] = updated[date].map((item) =>
+              item.id === checklistId ? { ...item, due_time: dueTime } : item
+            )
+          }
+          return updated
+        })
+      } catch (error) {
+        console.error("Error saving due time:", error)
+      }
+    },
+    [user, supabase]
+  )
+
+  // Save a reminder for a checklist item
+  const saveReminder = useCallback(
+    async (checklistId: string, reminderDatetime: string) => {
+      if (!user) return
+
+      try {
+        const response = await fetch("/api/reminders", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ checklistId, reminderDatetime }),
+        })
+
+        if (response.ok) {
+          const { reminder } = await response.json()
+          setReminders((prev) => ({
+            ...prev,
+            [checklistId]: reminder,
+          }))
+        }
+      } catch (error) {
+        console.error("Error saving reminder:", error)
+      }
+    },
+    [user]
+  )
+
+  // Remove a reminder for a checklist item
+  const removeReminder = useCallback(
+    async (checklistId: string) => {
+      if (!user) return
+
+      try {
+        const response = await fetch("/api/reminders", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ checklistId }),
+        })
+
+        if (response.ok) {
+          setReminders((prev) => {
+            const updated = { ...prev }
+            delete updated[checklistId]
+            return updated
+          })
+        }
+      } catch (error) {
+        console.error("Error removing reminder:", error)
+      }
+    },
+    [user]
+  )
+
   // Sign out
   const signOut = useCallback(async () => {
     await supabase.auth.signOut()
     setUser(null)
     setWeekData({})
     setChecklists({})
+    setReminders({})
   }, [supabase.auth])
 
   return {
@@ -467,9 +574,13 @@ export function usePlannerData(
     weekData,
     events,
     checklists,
+    reminders,
     saveTask,
     saveGoals,
     saveChecklist,
+    saveDueTime,
+    saveReminder,
+    removeReminder,
     clearWeek,
     signOut,
   }
