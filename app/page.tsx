@@ -533,6 +533,8 @@ export default function PlannerPage() {
                 onReminderRemove={removeReminder}
                 notificationsEnabled={notificationsEnabled}
                 onDueTimeSet={saveDueTime}
+                checklistTags={checklistTags}
+                onTagsExtracted={assignTagsToChecklist}
               />
             )
           })}
@@ -586,6 +588,8 @@ export default function PlannerPage() {
             onReminderRemove={removeReminder}
             notificationsEnabled={notificationsEnabled}
             onDueTimeSet={saveDueTime}
+            checklistTags={checklistTags}
+            onTagsExtracted={assignTagsToChecklist}
           />
         )
       })()}
