@@ -201,9 +201,10 @@ function SortableTaskItem({
             item.completed && "line-through text-muted-foreground"
           )}
         >
-          {stripTags(item.text)}
+          {/* Only strip tags from display if we have tag pills to show, otherwise keep hashtags visible */}
+          {tags.length > 0 ? stripTags(item.text) : item.text}
         </span>
-        {/* Tags display */}
+        {/* Tags display as colored pills */}
         {tags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-0.5">
             {tags.map((tag) => (

@@ -2,11 +2,18 @@ import { NextResponse } from "next/server"
 import webpush from "web-push"
 import { createClient } from "@/lib/supabase/server"
 
-webpush.setVapidDetails(
-  `mailto:${process.env.VAPID_EMAIL ?? "notifications@example.com"}`,
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "",
-  process.env.VAPID_PRIVATE_KEY ?? ""
-)
+// Lazy VAPID configuration - only configure when actually sending
+let vapidConfigured = false
+function ensureVapidConfigured() {
+  if (!vapidConfigured && process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    webpush.setVapidDetails(
+      `mailto:${process.env.VAPID_EMAIL ?? "notifications@example.com"}`,
+      process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
+      process.env.VAPID_PRIVATE_KEY
+    )
+    vapidConfigured = true
+  }
+}
 
 export async function POST(request: Request) {
   const supabase = await createClient()
@@ -19,6 +26,9 @@ export async function POST(request: Request) {
   if (!process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
     return NextResponse.json({ error: "VAPID keys not configured" }, { status: 500 })
   }
+
+  // Configure VAPID lazily
+  ensureVapidConfigured()
 
   let body: { endpoint: string }
   try {

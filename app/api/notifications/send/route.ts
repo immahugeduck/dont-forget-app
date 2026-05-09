@@ -2,12 +2,18 @@ import { NextResponse } from "next/server"
 import webpush from "web-push"
 import { createClient as createSupabaseClient } from "@supabase/supabase-js"
 
-// Configure VAPID details
-webpush.setVapidDetails(
-  `mailto:${process.env.VAPID_EMAIL ?? "notifications@example.com"}`,
-  process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "",
-  process.env.VAPID_PRIVATE_KEY ?? ""
-)
+// Lazy VAPID configuration - only configure when actually sending
+let vapidConfigured = false
+function ensureVapidConfigured() {
+  if (!vapidConfigured && process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
+    webpush.setVapidDetails(
+      `mailto:${process.env.VAPID_EMAIL ?? "notifications@example.com"}`,
+      process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
+      process.env.VAPID_PRIVATE_KEY
+    )
+    vapidConfigured = true
+  }
+}
 
 interface PushSubscriptionRow {
   id: string
@@ -44,6 +50,9 @@ export async function GET(request: Request) {
   if (!process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
     return NextResponse.json({ error: "VAPID keys not configured" }, { status: 500 })
   }
+
+  // Configure VAPID lazily
+  ensureVapidConfigured()
 
   // Use service role key to read all subscriptions (bypasses RLS)
   const supabase = createSupabaseClient(
