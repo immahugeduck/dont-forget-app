@@ -12,6 +12,7 @@ import { StatusIndicator } from "@/components/status-indicator"
 import { usePlannerData } from "@/hooks/use-planner-data"
 import { useWeather } from "@/hooks/use-weather"
 import { useNotifications } from "@/hooks/use-notifications"
+import { useCategories } from "@/hooks/use-categories"
 import { Calendar, BarChart3, Sparkles, Zap, LogIn, LogOut, User, CloudSun, CalendarDays, Bell } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { WeatherTab } from "@/components/weather-tab"
@@ -19,13 +20,8 @@ import { FocusedDayView } from "@/components/focused-day-view"
 import { NotificationSettings } from "@/components/notification-settings"
 import Link from "next/link"
 
-const CATEGORIES = [
-  { id: "personal", label: "Personal", color: "#8b5cf6", icon: "user" },
-  { id: "work", label: "Work", color: "#3b82f6", icon: "briefcase" },
-  { id: "home", label: "Home", color: "#10b981", icon: "home" },
-] as const
-
-type CategoryId = (typeof CATEGORIES)[number]["id"]
+// Default fallback category when user has none loaded yet
+const FALLBACK_CATEGORY = { id: "personal", name: "Personal", color: "#8b5cf6", icon: "user" }
 
 const DAYS_OF_WEEK = [
   { id: "monday", label: "Mon", fullLabel: "Monday" },
@@ -94,7 +90,7 @@ function isSameDay(d1: Date, d2: Date): boolean {
 
 export default function PlannerPage() {
   const [currentWeekStart, setCurrentWeekStart] = useState(() => getWeekStartDate(TODAY))
-  const [category, setCategory] = useState<CategoryId>("personal")
+  const [categoryId, setCategoryId] = useState<string | null>(null)
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [showCalendar, setShowCalendar] = useState(false)
   const [calendarViewDate, setCalendarViewDate] = useState(new Date(currentWeekStart))
@@ -102,6 +98,19 @@ export default function PlannerPage() {
   const [showWeather, setShowWeather] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [focusedDate, setFocusedDate] = useState<Date | null>(null)
+
+  const {
+    categories,
+    isLoading: isCategoriesLoading,
+    addCategory,
+    updateCategory,
+    deleteCategory,
+  } = useCategories()
+
+  // Set default category when categories load
+  const activeCategory = categoryId 
+    ? categories.find(c => c.id === categoryId) || categories[0] || FALLBACK_CATEGORY
+    : categories[0] || FALLBACK_CATEGORY
 
   const {
     user,
@@ -113,11 +122,12 @@ export default function PlannerPage() {
     saveTask,
     saveGoals,
     saveChecklist,
+    saveDueTime,
     saveReminder,
     removeReminder,
     clearWeek,
     signOut,
-  } = usePlannerData(currentWeekStart, category)
+  } = usePlannerData(currentWeekStart, activeCategory.name.toLowerCase())
 
   const {
     weatherData,
@@ -242,9 +252,7 @@ export default function PlannerPage() {
     return { filledDays, totalTags, hasGoals, wordCount }
   }, [weekData, allTags])
 
-  const currentCategory = CATEGORIES.find((c) => c.id === category)!
-
-  if (isLoading) {
+  if (isLoading || isCategoriesLoading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
         <div className="flex flex-col items-center gap-4">
@@ -268,7 +276,7 @@ export default function PlannerPage() {
             <div className="flex items-center gap-3">
               <div
                 className="w-10 h-10 rounded-xl flex items-center justify-center"
-                style={{ backgroundColor: currentCategory.color }}
+                style={{ backgroundColor: activeCategory.color }}
               >
                 <Zap className="w-5 h-5 text-background" />
               </div>
@@ -389,7 +397,15 @@ export default function PlannerPage() {
           )}
 
           {/* Category Tabs */}
-          <CategoryTabs categories={CATEGORIES} activeCategory={category} onSelect={setCategory} />
+          <CategoryTabs 
+            categories={categories.map(c => ({ id: c.id, name: c.name, color: c.color, icon: c.icon }))} 
+            activeCategory={activeCategory.id} 
+            onSelect={setCategoryId}
+            onAdd={addCategory}
+            onUpdate={updateCategory}
+            onDelete={deleteCategory}
+            isEditable={!!user}
+          />
         </div>
       </header>
 
@@ -429,7 +445,7 @@ export default function PlannerPage() {
             totalTags={stats.totalTags}
             hasGoals={stats.hasGoals}
             wordCount={stats.wordCount}
-            categoryColor={currentCategory.color}
+            categoryColor={activeCategory.color}
           />
         )}
 
@@ -477,7 +493,7 @@ export default function PlannerPage() {
                 date={slotDate}
                 content={content}
                 onUpdate={(val) => handleUpdate(slot.id, val, slotDate)}
-                categoryColor={currentCategory.color}
+                categoryColor={activeCategory.color}
                 isDimmed={!!isDimmed}
                 isToday={isToday}
                 isGoals={isGoals}
@@ -493,6 +509,7 @@ export default function PlannerPage() {
                 onReminderSet={saveReminder}
                 onReminderRemove={removeReminder}
                 notificationsEnabled={notificationsEnabled}
+                onDueTimeSet={saveDueTime}
               />
             )
           })}
@@ -532,7 +549,7 @@ export default function PlannerPage() {
             date={focusedDate}
             content={focusedContent}
             onUpdate={(val) => saveTask(slotId, val, focusedDate)}
-            categoryColor={currentCategory.color}
+            categoryColor={activeCategory.color}
             checklist={focusedChecklist}
             onChecklistUpdate={(items) => saveChecklist(dateKey, items)}
             weather={focusedWeather}
@@ -545,6 +562,7 @@ export default function PlannerPage() {
             onReminderSet={saveReminder}
             onReminderRemove={removeReminder}
             notificationsEnabled={notificationsEnabled}
+            onDueTimeSet={saveDueTime}
           />
         )
       })()}

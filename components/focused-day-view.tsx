@@ -23,6 +23,7 @@ interface FocusedDayViewProps {
   onReminderSet?: (checklistId: string, reminderDatetime: string) => void
   onReminderRemove?: (checklistId: string) => void
   notificationsEnabled?: boolean
+  onDueTimeSet?: (checklistId: string, dueTime: string | null) => void
 }
 
 const MONTHS = [
@@ -51,6 +52,7 @@ export function FocusedDayView({
   onReminderSet,
   onReminderRemove,
   notificationsEnabled,
+  onDueTimeSet,
 }: FocusedDayViewProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isAddingTask, setIsAddingTask] = useState(false)
@@ -234,6 +236,7 @@ export function FocusedDayView({
                 onReminderSet={onReminderSet}
                 onReminderRemove={onReminderRemove}
                 notificationsEnabled={notificationsEnabled}
+                onDueTimeSet={onDueTimeSet}
               />
 
               {!isAddingTask && (

@@ -50,6 +50,7 @@ export interface ChecklistRow {
   completed: boolean
   position: number
   category: string
+  due_time: string | null
   created_at: string
   updated_at: string
 }
@@ -193,6 +194,7 @@ export function usePlannerData(
               text: row.text,
               completed: row.completed,
               order: row.position,
+              due_time: row.due_time,
             })
             checklistIds.push(row.id)
           })
@@ -441,6 +443,7 @@ export function usePlannerData(
                 text: item.text,
                 completed: item.completed,
                 position: item.order,
+                due_time: item.due_time || null,
                 updated_at: new Date().toISOString(),
               })
               .eq("id", item.id)
@@ -456,6 +459,7 @@ export function usePlannerData(
               text: item.text,
               completed: item.completed,
               position: item.order,
+              due_time: item.due_time || null,
               category,
             })
 
@@ -470,6 +474,36 @@ export function usePlannerData(
       }
     },
     [user, weekKey, checklists, supabase, category]
+  )
+
+  // Save due time for a checklist item
+  const saveDueTime = useCallback(
+    async (checklistId: string, dueTime: string | null) => {
+      if (!user) return
+
+      try {
+        const { error } = await supabase
+          .from("checklists")
+          .update({ due_time: dueTime, updated_at: new Date().toISOString() })
+          .eq("id", checklistId)
+
+        if (error) throw error
+
+        // Update local state
+        setChecklists((prev) => {
+          const updated = { ...prev }
+          for (const date in updated) {
+            updated[date] = updated[date].map((item) =>
+              item.id === checklistId ? { ...item, due_time: dueTime } : item
+            )
+          }
+          return updated
+        })
+      } catch (error) {
+        console.error("Error saving due time:", error)
+      }
+    },
+    [user, supabase]
   )
 
   // Save a reminder for a checklist item
@@ -544,6 +578,7 @@ export function usePlannerData(
     saveTask,
     saveGoals,
     saveChecklist,
+    saveDueTime,
     saveReminder,
     removeReminder,
     clearWeek,

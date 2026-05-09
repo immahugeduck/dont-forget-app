@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useRef, useEffect } from "react"
-import { Check, Trash2, Bell, BellRing, X } from "lucide-react"
+import { Check, Trash2, Bell, BellRing, X, Clock } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
@@ -11,6 +11,7 @@ export interface ChecklistItem {
   text: string
   completed: boolean
   order: number
+  due_time?: string | null // Format: "HH:MM" or null
 }
 
 export interface TaskReminder {
@@ -35,6 +36,8 @@ interface DayChecklistProps {
   onReminderRemove?: (checklistId: string) => void
   /** Whether push notifications are enabled */
   notificationsEnabled?: boolean
+  /** Callback when due time is set (auto-creates reminder if notifications enabled) */
+  onDueTimeSet?: (checklistId: string, dueTime: string | null) => void
 }
 
 export function DayChecklist({ 
@@ -47,10 +50,12 @@ export function DayChecklist({
   onReminderSet,
   onReminderRemove,
   notificationsEnabled = false,
+  onDueTimeSet,
 }: DayChecklistProps) {
   const [newItemText, setNewItemText] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
   const [openReminderId, setOpenReminderId] = useState<string | null>(null)
+  const [openDueTimeId, setOpenDueTimeId] = useState<string | null>(null)
 
   // Get default datetime for new reminder (defaults to task date at 9am, or tomorrow if date is in past)
   const getDefaultReminderDatetime = () => {
@@ -98,6 +103,39 @@ export function DayChecklist({
     if (isToday) return `Today at ${timeStr}`
     if (isTomorrow) return `Tomorrow at ${timeStr}`
     return d.toLocaleDateString([], { month: "short", day: "numeric" }) + ` at ${timeStr}`
+  }
+
+  const formatDueTime = (time: string) => {
+    const [hours, minutes] = time.split(":").map(Number)
+    const d = new Date()
+    d.setHours(hours, minutes)
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+  }
+
+  const handleSetDueTime = (checklistId: string, time: string | null) => {
+    if (onDueTimeSet) {
+      onDueTimeSet(checklistId, time)
+      
+      // Auto-create reminder if notifications are enabled and time is set
+      if (time && notificationsEnabled && onReminderSet && date) {
+        const [hours, minutes] = time.split(":").map(Number)
+        const reminderDate = new Date(date)
+        reminderDate.setHours(hours, minutes, 0, 0)
+        
+        // Only set reminder if it's in the future
+        if (reminderDate > new Date()) {
+          onReminderSet(checklistId, reminderDate.toISOString())
+        }
+      }
+    }
+    setOpenDueTimeId(null)
+  }
+
+  const handleClearDueTime = (checklistId: string) => {
+    if (onDueTimeSet) {
+      onDueTimeSet(checklistId, null)
+    }
+    setOpenDueTimeId(null)
   }
 
   useEffect(() => {
@@ -193,8 +231,90 @@ export function DayChecklist({
               {item.text}
             </span>
 
+            {/* Due time indicator */}
+            {item.due_time && (
+              <span className="text-[10px] text-muted-foreground whitespace-nowrap flex items-center gap-0.5">
+                <Clock className="w-2.5 h-2.5" />
+                {formatDueTime(item.due_time)}
+              </span>
+            )}
+
+            {/* Due time clock button */}
+            {onDueTimeSet && !item.completed && (
+              <Popover 
+                open={openDueTimeId === item.id} 
+                onOpenChange={(open) => setOpenDueTimeId(open ? item.id : null)}
+              >
+                <PopoverTrigger asChild>
+                  <button
+                    className={cn(
+                      "p-1 rounded transition-all",
+                      item.due_time 
+                        ? "text-muted-foreground opacity-100" 
+                        : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary"
+                    )}
+                    title={item.due_time ? "Edit due time" : "Set due time"}
+                  >
+                    <Clock className="w-3.5 h-3.5" />
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent className="w-56 p-3" align="end">
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-medium text-sm">Due Time</h4>
+                      <button 
+                        onClick={() => setOpenDueTimeId(null)}
+                        className="text-muted-foreground hover:text-foreground"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      <input
+                        type="time"
+                        defaultValue={item.due_time || "09:00"}
+                        className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background"
+                        id={`due-time-input-${item.id}`}
+                      />
+                      {notificationsEnabled && (
+                        <p className="text-[10px] text-muted-foreground">
+                          A reminder will be set automatically
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="flex gap-2">
+                      {item.due_time && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                          onClick={() => handleClearDueTime(item.id)}
+                        >
+                          Clear
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        className="flex-1"
+                        onClick={() => {
+                          const input = document.getElementById(`due-time-input-${item.id}`) as HTMLInputElement
+                          if (input?.value) {
+                            handleSetDueTime(item.id, input.value)
+                          }
+                        }}
+                      >
+                        {item.due_time ? "Update" : "Set Time"}
+                      </Button>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            )}
+
             {/* Reminder indicator (always visible if has reminder) */}
-            {hasReminder && (
+            {hasReminder && !item.due_time && (
               <span className="text-[10px] text-primary/70 whitespace-nowrap">
                 {formatReminderTime(reminder.reminder_datetime)}
               </span>

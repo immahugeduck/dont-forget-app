@@ -29,6 +29,7 @@ interface DayCardProps {
   onReminderSet?: (checklistId: string, reminderDatetime: string) => void
   onReminderRemove?: (checklistId: string) => void
   notificationsEnabled?: boolean
+  onDueTimeSet?: (checklistId: string, dueTime: string | null) => void
 }
 
 const MONTHS = [
@@ -53,6 +54,7 @@ export function DayCard({
   onReminderSet,
   onReminderRemove,
   notificationsEnabled,
+  onDueTimeSet,
 }: DayCardProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isAddingTask, setIsAddingTask] = useState(false)
@@ -196,6 +198,7 @@ export function DayCard({
               onReminderSet={onReminderSet}
               onReminderRemove={onReminderRemove}
               notificationsEnabled={notificationsEnabled}
+              onDueTimeSet={onDueTimeSet}
             />
           )}
         </div>
