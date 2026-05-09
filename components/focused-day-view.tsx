@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { useRef, useEffect, useState } from "react"
 import { DayChecklist, ChecklistItem, TaskReminder } from "./day-checklist"
 import { WeatherIcons, WeatherData } from "./weather-display"
+import { UserTag } from "@/hooks/use-tags"
 
 interface FocusedDayViewProps {
   date: Date
@@ -24,6 +25,8 @@ interface FocusedDayViewProps {
   onReminderRemove?: (checklistId: string) => void
   notificationsEnabled?: boolean
   onDueTimeSet?: (checklistId: string, dueTime: string | null) => void
+  checklistTags?: Record<string, UserTag[]>
+  onTagsExtracted?: (checklistId: string, tagNames: string[]) => void
 }
 
 const MONTHS = [
@@ -53,6 +56,8 @@ export function FocusedDayView({
   onReminderRemove,
   notificationsEnabled,
   onDueTimeSet,
+  checklistTags,
+  onTagsExtracted,
 }: FocusedDayViewProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isAddingTask, setIsAddingTask] = useState(false)
@@ -237,6 +242,8 @@ export function FocusedDayView({
                 onReminderRemove={onReminderRemove}
                 notificationsEnabled={notificationsEnabled}
                 onDueTimeSet={onDueTimeSet}
+                checklistTags={checklistTags}
+                onTagsExtracted={onTagsExtracted}
               />
 
               {!isAddingTask && (

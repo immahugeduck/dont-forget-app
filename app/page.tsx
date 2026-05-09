@@ -13,6 +13,8 @@ import { usePlannerData } from "@/hooks/use-planner-data"
 import { useWeather } from "@/hooks/use-weather"
 import { useNotifications } from "@/hooks/use-notifications"
 import { useCategories } from "@/hooks/use-categories"
+import { useTags } from "@/hooks/use-tags"
+import { TagSearch } from "@/components/tag-search"
 import { Calendar, BarChart3, Sparkles, Zap, LogIn, LogOut, User, CloudSun, CalendarDays, Bell } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { WeatherTab } from "@/components/weather-tab"
@@ -144,6 +146,27 @@ export default function PlannerPage() {
   })
 
   const { isSubscribed: notificationsEnabled } = useNotifications()
+
+  const {
+    tags,
+    checklistTags,
+    loadChecklistTags,
+    assignTagsToChecklist,
+  } = useTags()
+
+  // Load tags for visible checklist items
+  const allChecklistIds = useMemo(() => {
+    return Object.values(checklists).flat().map((item) => item.id)
+  }, [checklists])
+
+  // Load checklist tags when checklist items change
+  useMemo(() => {
+    if (allChecklistIds.length > 0) {
+      loadChecklistTags(allChecklistIds)
+    }
+  }, [allChecklistIds, loadChecklistTags])
+
+  const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null)
 
   const weekNumber = getWeekNumber(currentWeekStart)
   const weekEndDate = getWeekEndDate(currentWeekStart)

@@ -22,6 +22,8 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
+import { UserTag, extractTags, stripTags } from "@/hooks/use-tags"
+import { TagPill } from "./tag-search"
 
 export interface ChecklistItem {
   id: string
@@ -55,6 +57,10 @@ interface DayChecklistProps {
   notificationsEnabled?: boolean
   /** Callback when due time is set (auto-creates reminder if notifications enabled) */
   onDueTimeSet?: (checklistId: string, dueTime: string | null) => void
+  /** Tags assigned to checklist items, keyed by checklist_id */
+  checklistTags?: Record<string, UserTag[]>
+  /** Callback when tags should be assigned to a checklist item */
+  onTagsExtracted?: (checklistId: string, tagNames: string[]) => void
 }
 
 interface SortableTaskItemProps {
@@ -75,6 +81,7 @@ interface SortableTaskItemProps {
   formatReminderTime: (datetime: string) => string
   getDefaultReminderDatetime: () => string
   date?: Date
+  tags?: UserTag[]
 }
 
 function SortableTaskItem({
@@ -95,6 +102,7 @@ function SortableTaskItem({
   formatReminderTime,
   getDefaultReminderDatetime,
   date,
+  tags = [],
 }: SortableTaskItemProps) {
   const {
     attributes,
@@ -186,14 +194,24 @@ function SortableTaskItem({
         )}
       </button>
       
-      <span
-        className={cn(
-          "flex-1 text-sm transition-all",
-          item.completed && "line-through text-muted-foreground"
+      <div className="flex-1 min-w-0">
+        <span
+          className={cn(
+            "text-sm transition-all",
+            item.completed && "line-through text-muted-foreground"
+          )}
+        >
+          {stripTags(item.text)}
+        </span>
+        {/* Tags display */}
+        {tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-0.5">
+            {tags.map((tag) => (
+              <TagPill key={tag.id} tag={tag} size="xs" />
+            ))}
+          </div>
         )}
-      >
-        {item.text}
-      </span>
+      </div>
 
       {/* Due time indicator */}
       {item.due_time && (
@@ -389,6 +407,8 @@ export function DayChecklist({
   onReminderRemove,
   notificationsEnabled = false,
   onDueTimeSet,
+  checklistTags = {},
+  onTagsExtracted,
 }: DayChecklistProps) {
   const [newItemText, setNewItemText] = useState("")
   const inputRef = useRef<HTMLInputElement>(null)
@@ -486,13 +506,22 @@ export function DayChecklist({
 
   const addItem = () => {
     if (newItemText.trim()) {
+      const text = newItemText.trim()
       const newItem: ChecklistItem = {
         id: crypto.randomUUID(),
-        text: newItemText.trim(),
+        text,
         completed: false,
         order: items.length,
       }
       onItemsChange([...items, newItem])
+      
+      // Extract and assign tags from the text
+      const tagNames = extractTags(text)
+      if (tagNames.length > 0 && onTagsExtracted) {
+        // Need to call after the item is saved, so we use setTimeout
+        setTimeout(() => onTagsExtracted(newItem.id, tagNames), 100)
+      }
+      
       setNewItemText("")
     }
   }
@@ -549,6 +578,7 @@ export function DayChecklist({
           {sortedItems.map((item) => {
             const reminder = reminders[item.id]
             const hasReminder = !!reminder && !reminder.sent
+            const itemTags = checklistTags[item.id] || []
 
             return (
               <SortableTaskItem
@@ -570,6 +600,7 @@ export function DayChecklist({
                 formatReminderTime={formatReminderTime}
                 getDefaultReminderDatetime={getDefaultReminderDatetime}
                 date={date}
+                tags={itemTags}
               />
             )
           })}

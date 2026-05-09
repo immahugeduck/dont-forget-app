@@ -4,6 +4,7 @@ import { Target, Sparkles, ListTodo } from "lucide-react"
 import { useRef, useEffect, useState } from "react"
 import { DayChecklist, ChecklistItem, TaskReminder } from "./day-checklist"
 import { WeatherIcons, WeatherData } from "./weather-display"
+import { UserTag } from "@/hooks/use-tags"
 import { Button } from "@/components/ui/button"
 import {
   Tooltip,
@@ -30,6 +31,8 @@ interface DayCardProps {
   onReminderRemove?: (checklistId: string) => void
   notificationsEnabled?: boolean
   onDueTimeSet?: (checklistId: string, dueTime: string | null) => void
+  checklistTags?: Record<string, UserTag[]>
+  onTagsExtracted?: (checklistId: string, tagNames: string[]) => void
 }
 
 const MONTHS = [
@@ -55,6 +58,8 @@ export function DayCard({
   onReminderRemove,
   notificationsEnabled,
   onDueTimeSet,
+  checklistTags,
+  onTagsExtracted,
 }: DayCardProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [isAddingTask, setIsAddingTask] = useState(false)
@@ -199,6 +204,8 @@ export function DayCard({
               onReminderRemove={onReminderRemove}
               notificationsEnabled={notificationsEnabled}
               onDueTimeSet={onDueTimeSet}
+              checklistTags={checklistTags}
+              onTagsExtracted={onTagsExtracted}
             />
           )}
         </div>
