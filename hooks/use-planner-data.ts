@@ -144,17 +144,15 @@ export function usePlannerData(
 
         if (notesError) throw notesError
 
-        // Convert notes to weekData format
+        // Convert notes to weekData format - use dateKey for day notes
         const data: Record<string, string> = {}
         notesData?.forEach((note: Note) => {
-          // Check if this is a day note or goals note
-          const dayIndex = weekDates.indexOf(note.date)
-          if (dayIndex !== -1) {
-            // It's a day note
-            data[daySlots[dayIndex]] = note.content
-          } else if (note.date === goalsKey) {
+          if (note.date === goalsKey) {
             // It's the goals note
             data["goals"] = note.content
+          } else if (weekDates.includes(note.date)) {
+            // It's a day note - store by dateKey directly
+            data[note.date] = note.content
           }
         })
 
@@ -282,7 +280,8 @@ export function usePlannerData(
           if (error) throw error
         }
 
-        setWeekData((prev) => ({ ...prev, [slotId]: content }))
+        // Store by dateKey for consistent lookup
+        setWeekData((prev) => ({ ...prev, [dateKey]: content }))
         setStatus("saved")
       } catch (error) {
         console.error("Error saving day content:", error)

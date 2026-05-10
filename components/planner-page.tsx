@@ -495,17 +495,18 @@ export function PlannerPage() {
         {/* Day Cards */}
         <div className="space-y-3 mt-4">
           {ALL_SLOTS.map((slot, index) => {
-            const content = weekData[slot.id] ?? ""
-            const tags = extractTags(content)
-            const isDimmed = activeTag && !tags.includes(activeTag)
             const isGoals = slot.id === "goals"
             const slotDate = isGoals ? undefined : weekDates[index]
             const isToday = slotDate ? isSameDay(slotDate, TODAY) : false
             
-            // Get date key for checklist and weather
+            // Get date key for content, checklist and weather
             const dateKey = slotDate 
               ? `${slotDate.getFullYear()}-${String(slotDate.getMonth() + 1).padStart(2, "0")}-${String(slotDate.getDate()).padStart(2, "0")}`
               : ""
+            // Use dateKey for day content, slot.id for goals
+            const content = isGoals ? (weekData["goals"] ?? "") : (weekData[dateKey] ?? "")
+            const tags = extractTags(content)
+            const isDimmed = activeTag && !tags.includes(activeTag)
             const dayChecklist = dateKey ? checklists[dateKey] || [] : []
             const dayWeather = dateKey ? weatherData[dateKey] || null : null
 
@@ -515,7 +516,7 @@ export function PlannerPage() {
                 slot={slot}
                 date={slotDate}
                 content={content}
-                onUpdate={(val) => handleUpdate(slot.id, val, slotDate)}
+                onUpdate={(val) => handleUpdate(isGoals ? "goals" : dateKey, val, slotDate)}
                 categoryColor={activeCategory.color}
                 isDimmed={!!isDimmed}
                 isToday={isToday}
@@ -561,11 +562,9 @@ export function PlannerPage() {
 
       {/* Focused Day View */}
       {focusedDate && (() => {
-        const dayOfWeek = focusedDate.getDay()
-        const slotIndex = dayOfWeek === 0 ? 6 : dayOfWeek - 1
-        const slotId = DAYS_OF_WEEK[slotIndex].id
-        const focusedContent = weekData[slotId] ?? ""
+        // Use date-based key for all content, not slot-based
         const dateKey = `${focusedDate.getFullYear()}-${String(focusedDate.getMonth() + 1).padStart(2, "0")}-${String(focusedDate.getDate()).padStart(2, "0")}`
+        const focusedContent = weekData[dateKey] ?? ""
         const focusedChecklist = checklists[dateKey] || []
         const focusedWeather = weatherData[dateKey] || null
 
@@ -573,7 +572,7 @@ export function PlannerPage() {
           <FocusedDayView
             date={focusedDate}
             content={focusedContent}
-            onUpdate={(val) => saveTask(slotId, val, focusedDate)}
+            onUpdate={(val) => saveTask(dateKey, val, focusedDate)}
             categoryColor={activeCategory.color}
             checklist={focusedChecklist}
             onChecklistUpdate={(items) => saveChecklist(dateKey, items)}
