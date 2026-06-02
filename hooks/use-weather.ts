@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { WeatherData, generateMockWeather } from "@/components/weather-display"
 
 interface UseWeatherOptions {
@@ -20,23 +20,7 @@ export function useWeather({ startDate, endDate }: UseWeatherOptions) {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [useRealWeather, setUseRealWeather] = useState(false)
-
-  // Load saved location from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem("last-one-weather-location")
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved)
-        setLocation(parsed)
-        setUseRealWeather(true)
-      } catch {
-        // Ignore parse errors
-      }
-    }
-
-    // Generate mock weather for the date range initially
-    generateMockWeatherRange()
-  }, [])
+  const hasRequestedLocation = useRef(false)
 
   // Generate mock weather for the full date range
   const generateMockWeatherRange = useCallback(() => {
@@ -140,6 +124,37 @@ export function useWeather({ startDate, endDate }: UseWeatherOptions) {
       }
     )
   }, [fetchWeather])
+
+  // Load saved location from localStorage or auto-request on mount
+  useEffect(() => {
+    const saved = localStorage.getItem("last-one-weather-location")
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved)
+        setLocation(parsed)
+        setUseRealWeather(true)
+        // Fetch fresh weather data for the saved location
+        fetchWeather(parsed.lat, parsed.lon)
+      } catch {
+        // Ignore parse errors, will auto-request below
+      }
+    } else if (!hasRequestedLocation.current) {
+      // Auto-request location on first load if no saved location
+      hasRequestedLocation.current = true
+      // Generate mock weather first, then request location
+      generateMockWeatherRange()
+      // Small delay to let the UI render first
+      setTimeout(() => {
+        requestLocation()
+      }, 500)
+      return
+    }
+
+    // Generate mock weather for the date range if not auto-requesting
+    if (saved) {
+      generateMockWeatherRange()
+    }
+  }, [fetchWeather, generateMockWeatherRange, requestLocation])
 
   // Update location manually (by coordinates)
   const setManualLocation = useCallback((lat: number, lon: number) => {
