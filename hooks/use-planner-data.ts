@@ -107,8 +107,8 @@ export function usePlannerData(
         } else {
           setWeekData({})
         }
-        // Load checklists from localStorage
-        const checklistKey = `last-one-checklists-${weekKey}`
+        // Load checklists from localStorage (include category for separation)
+        const checklistKey = `last-one-checklists-${weekKey}-${category}`
         const storedChecklists = localStorage.getItem(checklistKey)
         if (storedChecklists) {
           try {
@@ -136,23 +136,28 @@ export function usePlannerData(
         }
 
         // Load all notes for the week (each day's content stored as a note)
+        // Filter by category so each tab has its own calendar data
+        const categoryGoalsKey = `goals-${weekKey}-${category}`
+        const categoryDates = weekDates.map(d => `${d}-${category}`)
+        
         const { data: notesData, error: notesError } = await supabase
           .from("notes")
           .select("*")
           .eq("user_id", user.id)
-          .in("date", [...weekDates, goalsKey]) // Include goals key
+          .in("date", [...categoryDates, categoryGoalsKey])
 
         if (notesError) throw notesError
 
         // Convert notes to weekData format - use dateKey for day notes
         const data: Record<string, string> = {}
         notesData?.forEach((note: Note) => {
-          if (note.date === goalsKey) {
+          if (note.date === categoryGoalsKey) {
             // It's the goals note
             data["goals"] = note.content
-          } else if (weekDates.includes(note.date)) {
-            // It's a day note - store by dateKey directly
-            data[note.date] = note.content
+          } else if (categoryDates.includes(note.date)) {
+            // It's a day note - extract the original dateKey (remove category suffix)
+            const originalDateKey = note.date.replace(`-${category}`, "")
+            data[originalDateKey] = note.content
           }
         })
 
@@ -173,10 +178,12 @@ export function usePlannerData(
         }
 
         // Load checklists for the week (individual rows per item)
+        // Filter by category so each tab has its own checklist data
         const { data: checklistsData, error: checklistsError } = await supabase
           .from("checklists")
           .select("*")
           .eq("user_id", user.id)
+          .eq("category", category)
           .in("date", weekDates)
           .order("position", { ascending: true })
 
@@ -252,13 +259,15 @@ export function usePlannerData(
 
       try {
         const dateKey = formatDateKey(date)
+        // Use category suffix to separate data between tabs
+        const categoryDateKey = `${dateKey}-${category}`
 
-        // Check if note exists for this date
+        // Check if note exists for this date + category
         const { data: existing } = await supabase
           .from("notes")
           .select("id")
           .eq("user_id", user.id)
-          .eq("date", dateKey)
+          .eq("date", categoryDateKey)
           .single()
 
         if (existing) {
@@ -273,7 +282,7 @@ export function usePlannerData(
           // Insert new
           const { error } = await supabase.from("notes").insert({
             user_id: user.id,
-            date: dateKey,
+            date: categoryDateKey,
             content,
           })
 
@@ -313,12 +322,13 @@ export function usePlannerData(
       }
 
       try {
-        // Check if goals note exists (using special goals key)
+        // Check if goals note exists (using special goals key with category)
+        const categoryGoalsKey = `goals-${weekKey}-${category}`
         const { data: existing } = await supabase
           .from("notes")
           .select("id")
           .eq("user_id", user.id)
-          .eq("date", goalsKey)
+          .eq("date", categoryGoalsKey)
           .single()
 
         if (existing) {
@@ -333,7 +343,7 @@ export function usePlannerData(
           // Insert new
           const { error } = await supabase.from("notes").insert({
             user_id: user.id,
-            date: goalsKey,
+            date: categoryGoalsKey,
             content,
           })
 
@@ -354,8 +364,11 @@ export function usePlannerData(
   const clearWeek = useCallback(async () => {
     if (!user) {
       const storageKey = `last-one-week-${weekKey}-${category}`
+      const checklistKey = `last-one-checklists-${weekKey}-${category}`
       localStorage.removeItem(storageKey)
+      localStorage.removeItem(checklistKey)
       setWeekData({})
+      setChecklists({})
       return
     }
 
@@ -367,18 +380,21 @@ export function usePlannerData(
         weekDates.push(formatDateKey(d))
       }
 
-      // Delete all notes for this week (day content + goals)
+      // Delete all notes for this week + category (day content + goals)
+      const categoryGoalsKey = `goals-${weekKey}-${category}`
+      const categoryDates = weekDates.map(d => `${d}-${category}`)
       await supabase
         .from("notes")
         .delete()
         .eq("user_id", user.id)
-        .in("date", [...weekDates, goalsKey])
+        .in("date", [...categoryDates, categoryGoalsKey])
 
-      // Delete checklists for this week
+      // Delete checklists for this week + category
       await supabase
         .from("checklists")
         .delete()
         .eq("user_id", user.id)
+        .eq("category", category)
         .in("date", weekDates)
 
       setWeekData({})
@@ -399,8 +415,8 @@ export function usePlannerData(
       setChecklists((prev) => ({ ...prev, [date]: items }))
 
       if (!user) {
-        // For non-authenticated users, use localStorage
-        const checklistKey = `last-one-checklists-${weekKey}`
+        // For non-authenticated users, use localStorage (include category)
+        const checklistKey = `last-one-checklists-${weekKey}-${category}`
         setTimeout(() => {
           try {
             const updated = { ...checklists, [date]: items }
@@ -414,12 +430,13 @@ export function usePlannerData(
       }
 
       try {
-        // Get existing checklist items for this date
+        // Get existing checklist items for this date + category
         const { data: existingItems } = await supabase
           .from("checklists")
           .select("id")
           .eq("user_id", user.id)
           .eq("date", date)
+          .eq("category", category)
 
         const existingIds = new Set(existingItems?.map((item) => item.id) || [])
         const newIds = new Set(items.map((item) => item.id))
