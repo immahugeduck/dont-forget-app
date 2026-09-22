@@ -179,9 +179,9 @@ export function FocusedDayView({
                 <Sun className="w-5 h-5" style={{ color: categoryColor }} />
               </div>
               <div>
-                <p className="text-sm font-medium">{weather.condition}</p>
+                <p className="text-sm font-medium capitalize">{weather.description ?? weather.conditions?.[0]}</p>
                 <p className="text-xs text-muted-foreground">
-                  High {weather.high}° · Low {weather.low}°
+                  High {weather.temp_high}° · Low {weather.temp_low}°
                 </p>
               </div>
             </div>
