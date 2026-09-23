@@ -140,6 +140,20 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 })
 
+// Native (Capacitor/Android) FCM device push tokens. Separate from
+// push_subscriptions because FCM uses a single opaque token per device,
+// not a web-push endpoint + VAPID keypair.
+export const deviceTokens = pgTable("device_tokens", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  userId: text("user_id").notNull(),
+  token: text("token").notNull(),
+  platform: text("platform").notNull().default("android"),
+  reminderTime: text("reminder_time").notNull().default("08:00"),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+})
+
 export const taskReminders = pgTable("task_reminders", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: text("user_id").notNull(),

@@ -16,10 +16,11 @@ export function NativeShell() {
       const { Capacitor } = await import("@capacitor/core")
       if (!Capacitor.isNativePlatform()) return
 
-      const [{ StatusBar, Style }, { SplashScreen }, { App }] = await Promise.all([
+      const [{ StatusBar, Style }, { SplashScreen }, { App }, { PushNotifications }] = await Promise.all([
         import("@capacitor/status-bar"),
         import("@capacitor/splash-screen"),
         import("@capacitor/app"),
+        import("@capacitor/push-notifications"),
       ])
 
       // Match the app's dark chrome.
@@ -37,6 +38,21 @@ export function NativeShell() {
         // ignore
       }
 
+      // Android 8+ requires a notification channel or background/system-tray
+      // notifications silently fail to display. This id matches the channelId
+      // the server sends via FCM (lib/fcm.ts) and the manifest default channel.
+      try {
+        await PushNotifications.createChannel({
+          id: "default",
+          name: "Reminders",
+          description: "Daily planning and task reminders",
+          importance: 5, // HIGH — heads-up notifications
+          visibility: 1, // PUBLIC on the lock screen
+        })
+      } catch {
+        // createChannel is Android-only; ignore elsewhere.
+      }
+
       // Android hardware back button: go back in history, or minimize the app
       // instead of killing it when there is nowhere left to go.
       const handle = await App.addListener("backButton", ({ canGoBack }) => {
@@ -47,8 +63,26 @@ export function NativeShell() {
         }
       })
 
+      // When the user taps a push notification, navigate to the URL carried in
+      // its data payload (defaults to home). Works whether the app was in the
+      // background or fully closed.
+      const tapHandle = await PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
+        const url = (action.notification.data as { url?: string } | undefined)?.url
+        if (url) {
+          try {
+            const target = new URL(url, window.location.origin)
+            if (target.origin === window.location.origin) {
+              window.location.assign(target.pathname + target.search + target.hash)
+            }
+          } catch {
+            // ignore malformed URLs
+          }
+        }
+      })
+
       cleanup = () => {
         handle.remove()
+        tapHandle.remove()
       }
     }
 

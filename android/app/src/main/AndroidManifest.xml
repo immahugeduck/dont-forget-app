@@ -33,9 +33,17 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
+
+        <!-- FCM: default channel used for background/system-tray notifications.
+             Must match the channel created at runtime and the channelId sent by the server. -->
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="default" />
     </application>
 
     <!-- Permissions -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Android 13+ runtime permission for showing notifications -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 </manifest>

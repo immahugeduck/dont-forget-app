@@ -31,6 +31,10 @@ const config: CapacitorConfig = {
       backgroundColor: "#0f0f11",
       style: "DARK",
     },
+    PushNotifications: {
+      // Show heads-up notifications with sound while the app is in the foreground.
+      presentationOptions: ["badge", "sound", "alert"],
+    },
   },
 }
 

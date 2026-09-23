@@ -13,6 +13,7 @@
   "dependencies": {
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.2",
+    "@capacitor/push-notifications": "^8.1.2",
     "@capacitor/splash-screen": "^8.0.2",
     "@capacitor/status-bar": "^8.0.3",
     "@dnd-kit/core": "^6.3.1",
@@ -58,6 +59,7 @@
     "date-fns": "4.1.0",
     "drizzle-orm": "^0.45.3",
     "embla-carousel-react": "8.5.1",
+    "firebase-admin": "^14.4.0",
     "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
     "next": "16.0.10",
