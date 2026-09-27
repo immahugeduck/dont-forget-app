@@ -1,36 +1,40 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { db } from "@/lib/db"
+import { taskReminders } from "@/lib/db/schema"
+import { getUserId } from "@/lib/auth-helpers"
+import { and, eq } from "drizzle-orm"
+
+type ReminderRow = typeof taskReminders.$inferSelect
+
+function toReminder(r: ReminderRow) {
+  return {
+    id: r.id,
+    user_id: r.userId,
+    checklist_id: r.checklistId,
+    reminder_datetime: r.reminderDatetime,
+    sent: r.sent,
+    created_at: r.createdAt,
+  }
+}
 
 export async function GET() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-
-  if (!user) {
+  const userId = await getUserId()
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const { data: reminders, error } = await supabase
-    .from("task_reminders")
-    .select("*")
-    .eq("user_id", user.id)
+  const rows = await db.select().from(taskReminders).where(eq(taskReminders.userId, userId))
 
-  if (error) {
-    console.error("Error fetching reminders:", error)
-    return NextResponse.json({ error: "Failed to fetch reminders" }, { status: 500 })
-  }
-
-  return NextResponse.json({ reminders: reminders ?? [] })
+  return NextResponse.json({ reminders: rows.map(toReminder) })
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-
-  if (!user) {
+  const userId = await getUserId()
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  let body: { checklistId: string; reminderDatetime: string }
+  let body: { checklistId?: string; reminderDatetime?: string }
   try {
     body = await request.json()
   } catch {
@@ -43,49 +47,46 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing checklistId or reminderDatetime" }, { status: 400 })
   }
 
-  // Validate the datetime
   const reminderDate = new Date(reminderDatetime)
   if (isNaN(reminderDate.getTime())) {
     return NextResponse.json({ error: "Invalid datetime format" }, { status: 400 })
   }
 
-  // Don't allow reminders in the past
   if (reminderDate < new Date()) {
     return NextResponse.json({ error: "Reminder time must be in the future" }, { status: 400 })
   }
 
-  // Upsert the reminder (one reminder per checklist item)
-  const { data: reminder, error } = await supabase
-    .from("task_reminders")
-    .upsert(
-      {
-        user_id: user.id,
-        checklist_id: checklistId,
-        reminder_datetime: reminderDatetime,
-        sent: false,
-      },
-      { onConflict: "checklist_id" }
-    )
-    .select()
-    .single()
+  // One reminder per checklist item: update if present, else insert.
+  const [existing] = await db
+    .select({ id: taskReminders.id })
+    .from(taskReminders)
+    .where(and(eq(taskReminders.userId, userId), eq(taskReminders.checklistId, checklistId)))
+    .limit(1)
 
-  if (error) {
-    console.error("Error creating reminder:", error)
-    return NextResponse.json({ error: "Failed to create reminder" }, { status: 500 })
+  let reminder: ReminderRow
+  if (existing) {
+    ;[reminder] = await db
+      .update(taskReminders)
+      .set({ reminderDatetime: reminderDate, sent: false })
+      .where(and(eq(taskReminders.id, existing.id), eq(taskReminders.userId, userId)))
+      .returning()
+  } else {
+    ;[reminder] = await db
+      .insert(taskReminders)
+      .values({ userId, checklistId, reminderDatetime: reminderDate, sent: false })
+      .returning()
   }
 
-  return NextResponse.json({ reminder })
+  return NextResponse.json({ reminder: toReminder(reminder) })
 }
 
 export async function DELETE(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-
-  if (!user) {
+  const userId = await getUserId()
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  let body: { checklistId: string }
+  let body: { checklistId?: string }
   try {
     body = await request.json()
   } catch {
@@ -93,21 +94,13 @@ export async function DELETE(request: Request) {
   }
 
   const { checklistId } = body
-
   if (!checklistId) {
     return NextResponse.json({ error: "Missing checklistId" }, { status: 400 })
   }
 
-  const { error } = await supabase
-    .from("task_reminders")
-    .delete()
-    .eq("user_id", user.id)
-    .eq("checklist_id", checklistId)
-
-  if (error) {
-    console.error("Error deleting reminder:", error)
-    return NextResponse.json({ error: "Failed to delete reminder" }, { status: 500 })
-  }
+  await db
+    .delete(taskReminders)
+    .where(and(eq(taskReminders.userId, userId), eq(taskReminders.checklistId, checklistId)))
 
   return NextResponse.json({ success: true })
 }

@@ -1,40 +1,41 @@
-import { createClient } from "@/lib/supabase/server"
 import { NextResponse } from "next/server"
+import { db } from "@/lib/db"
+import { userTags } from "@/lib/db/schema"
+import { getUserId } from "@/lib/auth-helpers"
+import { and, asc, eq } from "drizzle-orm"
+
+type TagRow = typeof userTags.$inferSelect
+
+function toTag(r: TagRow) {
+  return {
+    id: r.id,
+    user_id: r.userId,
+    name: r.name,
+    color: r.color,
+    created_at: r.createdAt,
+  }
+}
 
 // GET - Fetch all user tags
 export async function GET() {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
+  const userId = await getUserId()
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const { data: tags, error } = await supabase
-    .from("user_tags")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("name", { ascending: true })
+  const rows = await db
+    .select()
+    .from(userTags)
+    .where(eq(userTags.userId, userId))
+    .orderBy(asc(userTags.name))
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  return NextResponse.json({ tags })
+  return NextResponse.json({ tags: rows.map(toTag) })
 }
 
-// POST - Create a new tag or get existing
+// POST - Create a new tag or return the existing one
 export async function POST(request: Request) {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
+  const userId = await getUserId()
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
@@ -44,54 +45,33 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Tag name is required" }, { status: 400 })
   }
 
-  // Normalize tag name (lowercase, trim, remove # if present)
   const normalizedName = name.toLowerCase().trim().replace(/^#/, "")
-
   if (!normalizedName) {
     return NextResponse.json({ error: "Invalid tag name" }, { status: 400 })
   }
 
-  // Check if tag already exists
-  const { data: existingTag } = await supabase
-    .from("user_tags")
-    .select("*")
-    .eq("user_id", user.id)
-    .eq("name", normalizedName)
-    .single()
+  const [existingTag] = await db
+    .select()
+    .from(userTags)
+    .where(and(eq(userTags.userId, userId), eq(userTags.name, normalizedName)))
+    .limit(1)
 
   if (existingTag) {
-    return NextResponse.json({ tag: existingTag })
+    return NextResponse.json({ tag: toTag(existingTag) })
   }
 
-  // Create new tag with random color if not specified
-  const tagColor = color || getRandomTagColor()
+  const [newTag] = await db
+    .insert(userTags)
+    .values({ userId, name: normalizedName, color: color || getRandomTagColor() })
+    .returning()
 
-  const { data: newTag, error } = await supabase
-    .from("user_tags")
-    .insert({
-      user_id: user.id,
-      name: normalizedName,
-      color: tagColor,
-    })
-    .select()
-    .single()
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  return NextResponse.json({ tag: newTag }, { status: 201 })
+  return NextResponse.json({ tag: toTag(newTag) }, { status: 201 })
 }
 
 // PATCH - Update a tag
 export async function PATCH(request: Request) {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
+  const userId = await getUserId()
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
@@ -105,30 +85,23 @@ export async function PATCH(request: Request) {
   if (name) updates.name = name.toLowerCase().trim().replace(/^#/, "")
   if (color) updates.color = color
 
-  const { data: tag, error } = await supabase
-    .from("user_tags")
-    .update(updates)
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .select()
-    .single()
+  const [tag] = await db
+    .update(userTags)
+    .set(updates)
+    .where(and(eq(userTags.id, id), eq(userTags.userId, userId)))
+    .returning()
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  if (!tag) {
+    return NextResponse.json({ error: "Tag not found" }, { status: 404 })
   }
 
-  return NextResponse.json({ tag })
+  return NextResponse.json({ tag: toTag(tag) })
 }
 
 // DELETE - Delete a tag
 export async function DELETE(request: Request) {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
+  const userId = await getUserId()
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
@@ -138,15 +111,7 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "Tag ID is required" }, { status: 400 })
   }
 
-  const { error } = await supabase
-    .from("user_tags")
-    .delete()
-    .eq("id", id)
-    .eq("user_id", user.id)
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  await db.delete(userTags).where(and(eq(userTags.id, id), eq(userTags.userId, userId)))
 
   return NextResponse.json({ success: true })
 }
@@ -154,17 +119,17 @@ export async function DELETE(request: Request) {
 // Helper: Generate random tag color
 function getRandomTagColor(): string {
   const colors = [
-    "#ef4444", // red
-    "#f97316", // orange
-    "#eab308", // yellow
-    "#22c55e", // green
-    "#14b8a6", // teal
-    "#06b6d4", // cyan
-    "#3b82f6", // blue
-    "#6366f1", // indigo
-    "#8b5cf6", // violet
-    "#a855f7", // purple
-    "#ec4899", // pink
+    "#ef4444",
+    "#f97316",
+    "#eab308",
+    "#22c55e",
+    "#14b8a6",
+    "#06b6d4",
+    "#3b82f6",
+    "#6366f1",
+    "#8b5cf6",
+    "#a855f7",
+    "#ec4899",
   ]
   return colors[Math.floor(Math.random() * colors.length)]
 }

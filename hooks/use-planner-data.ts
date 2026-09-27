@@ -1,8 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { createClient } from "@/lib/supabase/client"
-import type { User } from "@supabase/supabase-js"
+import { authClient } from "@/lib/auth-client"
 import { ChecklistItem, TaskReminder } from "@/components/day-checklist"
 
 export interface Task {
@@ -59,11 +58,10 @@ function formatDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
 }
 
-export function usePlannerData(
-  weekStartDate: Date,
-  category: string
-) {
-  const [user, setUser] = useState<User | null>(null)
+export function usePlannerData(weekStartDate: Date, category: string) {
+  const { data: sessionData, isPending: sessionPending } = authClient.useSession()
+  const user = sessionData?.user ?? null
+
   const [isLoading, setIsLoading] = useState(true)
   const [status, setStatus] = useState<"saved" | "saving" | "offline">("saved")
   const [weekData, setWeekData] = useState<Record<string, string>>({})
@@ -71,157 +69,82 @@ export function usePlannerData(
   const [checklists, setChecklists] = useState<Record<string, ChecklistItem[]>>({})
   const [reminders, setReminders] = useState<Record<string, TaskReminder>>({})
 
-  const supabase = createClient()
   const weekKey = formatDateKey(weekStartDate)
-  // Use a special goals key to avoid collision with Monday's date
-  const goalsKey = `goals-${weekKey}`
 
-  // Check auth state
+  // Load data when week/category/auth changes
   useEffect(() => {
-    const checkUser = async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      setUser(user)
-      setIsLoading(false)
-    }
-    checkUser()
+    if (sessionPending) return
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null)
-    })
-
-    return () => subscription.unsubscribe()
-  }, [supabase.auth])
-
-  // Load data when week/category changes
-  useEffect(() => {
     if (!user) {
-// For non-authenticated users, use localStorage
-        const storageKey = `last-one-week-${weekKey}-${category}`
-        const stored = localStorage.getItem(storageKey)
-        if (stored) {
-          try {
-            setWeekData(JSON.parse(stored))
-          } catch {
-            setWeekData({})
-          }
-        } else {
+      // Non-authenticated users: use localStorage
+      const storageKey = `last-one-week-${weekKey}-${category}`
+      const stored = localStorage.getItem(storageKey)
+      if (stored) {
+        try {
+          setWeekData(JSON.parse(stored))
+        } catch {
           setWeekData({})
         }
-        // Load checklists from localStorage (include category for separation)
-        const checklistKey = `last-one-checklists-${weekKey}-${category}`
-        const storedChecklists = localStorage.getItem(checklistKey)
-        if (storedChecklists) {
-          try {
-            setChecklists(JSON.parse(storedChecklists))
-          } catch {
-            setChecklists({})
-          }
-        } else {
+      } else {
+        setWeekData({})
+      }
+
+      const checklistKey = `last-one-checklists-${weekKey}-${category}`
+      const storedChecklists = localStorage.getItem(checklistKey)
+      if (storedChecklists) {
+        try {
+          setChecklists(JSON.parse(storedChecklists))
+        } catch {
           setChecklists({})
         }
-        setIsLoading(false)
-        return
+      } else {
+        setChecklists({})
       }
+      setIsLoading(false)
+      return
+    }
 
     const loadData = async () => {
       setIsLoading(true)
       try {
-        // Generate week dates
-        const weekDates: string[] = []
-        const daySlots = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]
-        for (let i = 0; i < 7; i++) {
-          const d = new Date(weekStartDate)
-          d.setDate(d.getDate() + i)
-          weekDates.push(formatDateKey(d))
-        }
+        const res = await fetch(
+          `/api/planner?weekStart=${weekKey}&category=${encodeURIComponent(category)}`,
+        )
+        if (!res.ok) throw new Error("Failed to load planner data")
+        const { notes, events: eventsData, checklists: checklistsData, reminders: remindersData } =
+          await res.json()
 
-        // Load all notes for the week (each day's content stored as a note)
-        // Filter by category so each tab has its own calendar data
         const categoryGoalsKey = `goals-${weekKey}-${category}`
-        const categoryDates = weekDates.map(d => `${d}-${category}`)
-        
-        const { data: notesData, error: notesError } = await supabase
-          .from("notes")
-          .select("*")
-          .eq("user_id", user.id)
-          .in("date", [...categoryDates, categoryGoalsKey])
-
-        if (notesError) throw notesError
-
-        // Convert notes to weekData format - use dateKey for day notes
         const data: Record<string, string> = {}
-        notesData?.forEach((note: Note) => {
+        ;(notes as { date: string; content: string }[]).forEach((note) => {
           if (note.date === categoryGoalsKey) {
-            // It's the goals note
             data["goals"] = note.content
-          } else if (categoryDates.includes(note.date)) {
-            // It's a day note - extract the original dateKey (remove category suffix)
+          } else {
             const originalDateKey = note.date.replace(`-${category}`, "")
             data[originalDateKey] = note.content
           }
         })
 
-        // Load events for the week
-        const weekEndDate = new Date(weekStartDate)
-        weekEndDate.setDate(weekEndDate.getDate() + 6)
-        weekEndDate.setHours(23, 59, 59, 999)
+        setEvents((eventsData as PlannerEvent[]) ?? [])
 
-        const { data: eventsData, error: eventsError } = await supabase
-          .from("events")
-          .select("*")
-          .eq("user_id", user.id)
-          .gte("date", weekDates[0])
-          .lte("date", weekDates[6])
-
-        if (!eventsError && eventsData) {
-          setEvents(eventsData)
-        }
-
-        // Load checklists for the week (individual rows per item)
-        // Filter by category so each tab has its own checklist data
-        const { data: checklistsData, error: checklistsError } = await supabase
-          .from("checklists")
-          .select("*")
-          .eq("user_id", user.id)
-          .eq("category", category)
-          .in("date", weekDates)
-          .order("position", { ascending: true })
-
-        if (!checklistsError && checklistsData) {
-          const checklistMap: Record<string, ChecklistItem[]> = {}
-          const checklistIds: string[] = []
-          checklistsData.forEach((row: ChecklistRow) => {
-            if (!checklistMap[row.date]) {
-              checklistMap[row.date] = []
-            }
-            checklistMap[row.date].push({
-              id: row.id,
-              text: row.text,
-              completed: row.completed,
-              order: row.position,
-              due_time: row.due_time,
-            })
-            checklistIds.push(row.id)
+        const checklistMap: Record<string, ChecklistItem[]> = {}
+        ;(checklistsData as ChecklistRow[])?.forEach((row) => {
+          if (!checklistMap[row.date]) checklistMap[row.date] = []
+          checklistMap[row.date].push({
+            id: row.id,
+            text: row.text,
+            completed: row.completed,
+            order: row.position,
+            due_time: row.due_time,
           })
-          setChecklists(checklistMap)
+        })
+        setChecklists(checklistMap)
 
-          // Load reminders for these checklists
-          if (checklistIds.length > 0) {
-            const { data: remindersData, error: remindersError } = await supabase
-              .from("task_reminders")
-              .select("*")
-              .eq("user_id", user.id)
-              .in("checklist_id", checklistIds)
-
-            if (!remindersError && remindersData) {
-              const remindersMap: Record<string, TaskReminder> = {}
-              remindersData.forEach((row: TaskReminder) => {
-                remindersMap[row.checklist_id] = row
-              })
-              setReminders(remindersMap)
-            }
-          }
-        }
+        const remindersMap: Record<string, TaskReminder> = {}
+        ;(remindersData as TaskReminder[])?.forEach((row) => {
+          remindersMap[row.checklist_id] = row
+        })
+        setReminders(remindersMap)
 
         setWeekData(data)
         setStatus("saved")
@@ -234,7 +157,7 @@ export function usePlannerData(
     }
 
     loadData()
-  }, [user, weekKey, goalsKey, category, supabase, weekStartDate])
+  }, [user, weekKey, category, sessionPending])
 
   // Save day content (stored as notes)
   const saveTask = useCallback(
@@ -242,7 +165,6 @@ export function usePlannerData(
       setStatus("saving")
 
       if (!user) {
-        // For non-authenticated users, use localStorage
         const storageKey = `last-one-week-${weekKey}-${category}`
         const timeout = setTimeout(() => {
           try {
@@ -259,37 +181,14 @@ export function usePlannerData(
 
       try {
         const dateKey = formatDateKey(date)
-        // Use category suffix to separate data between tabs
         const categoryDateKey = `${dateKey}-${category}`
+        const res = await fetch("/api/notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: categoryDateKey, content }),
+        })
+        if (!res.ok) throw new Error("Failed to save note")
 
-        // Check if note exists for this date + category
-        const { data: existing } = await supabase
-          .from("notes")
-          .select("id")
-          .eq("user_id", user.id)
-          .eq("date", categoryDateKey)
-          .single()
-
-        if (existing) {
-          // Update existing
-          const { error } = await supabase
-            .from("notes")
-            .update({ content, updated_at: new Date().toISOString() })
-            .eq("id", existing.id)
-
-          if (error) throw error
-        } else if (content.trim()) {
-          // Insert new
-          const { error } = await supabase.from("notes").insert({
-            user_id: user.id,
-            date: categoryDateKey,
-            content,
-          })
-
-          if (error) throw error
-        }
-
-        // Store by dateKey for consistent lookup
         setWeekData((prev) => ({ ...prev, [dateKey]: content }))
         setStatus("saved")
       } catch (error) {
@@ -297,7 +196,7 @@ export function usePlannerData(
         setStatus("offline")
       }
     },
-    [user, category, weekKey, weekData, supabase]
+    [user, category, weekKey, weekData],
   )
 
   // Save weekly goals/notes
@@ -306,7 +205,6 @@ export function usePlannerData(
       setStatus("saving")
 
       if (!user) {
-        // For non-authenticated users, use localStorage
         const storageKey = `last-one-week-${weekKey}-${category}`
         const timeout = setTimeout(() => {
           try {
@@ -322,33 +220,13 @@ export function usePlannerData(
       }
 
       try {
-        // Check if goals note exists (using special goals key with category)
         const categoryGoalsKey = `goals-${weekKey}-${category}`
-        const { data: existing } = await supabase
-          .from("notes")
-          .select("id")
-          .eq("user_id", user.id)
-          .eq("date", categoryGoalsKey)
-          .single()
-
-        if (existing) {
-          // Update existing
-          const { error } = await supabase
-            .from("notes")
-            .update({ content, updated_at: new Date().toISOString() })
-            .eq("id", existing.id)
-
-          if (error) throw error
-        } else if (content.trim()) {
-          // Insert new
-          const { error } = await supabase.from("notes").insert({
-            user_id: user.id,
-            date: categoryGoalsKey,
-            content,
-          })
-
-          if (error) throw error
-        }
+        const res = await fetch("/api/notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ key: categoryGoalsKey, content }),
+        })
+        if (!res.ok) throw new Error("Failed to save goals")
 
         setWeekData((prev) => ({ ...prev, goals: content }))
         setStatus("saved")
@@ -357,7 +235,7 @@ export function usePlannerData(
         setStatus("offline")
       }
     },
-    [user, category, weekKey, goalsKey, weekData, supabase]
+    [user, category, weekKey, weekData],
   )
 
   // Clear week data
@@ -373,29 +251,12 @@ export function usePlannerData(
     }
 
     try {
-      const weekDates: string[] = []
-      for (let i = 0; i < 7; i++) {
-        const d = new Date(weekStartDate)
-        d.setDate(d.getDate() + i)
-        weekDates.push(formatDateKey(d))
-      }
-
-      // Delete all notes for this week + category (day content + goals)
-      const categoryGoalsKey = `goals-${weekKey}-${category}`
-      const categoryDates = weekDates.map(d => `${d}-${category}`)
-      await supabase
-        .from("notes")
-        .delete()
-        .eq("user_id", user.id)
-        .in("date", [...categoryDates, categoryGoalsKey])
-
-      // Delete checklists for this week + category
-      await supabase
-        .from("checklists")
-        .delete()
-        .eq("user_id", user.id)
-        .eq("category", category)
-        .in("date", weekDates)
+      const res = await fetch("/api/planner", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ weekStart: weekKey, category }),
+      })
+      if (!res.ok) throw new Error("Failed to clear week")
 
       setWeekData({})
       setChecklists({})
@@ -404,9 +265,9 @@ export function usePlannerData(
       console.error("Error clearing week:", error)
       setStatus("offline")
     }
-  }, [user, category, weekKey, goalsKey, weekStartDate, supabase])
+  }, [user, category, weekKey])
 
-  // Save checklist - handles individual rows per checklist item
+  // Save checklist - replaces the day's items
   const saveChecklist = useCallback(
     async (date: string, items: ChecklistItem[]) => {
       setStatus("saving")
@@ -415,7 +276,6 @@ export function usePlannerData(
       setChecklists((prev) => ({ ...prev, [date]: items }))
 
       if (!user) {
-        // For non-authenticated users, use localStorage (include category)
         const checklistKey = `last-one-checklists-${weekKey}-${category}`
         setTimeout(() => {
           try {
@@ -430,66 +290,19 @@ export function usePlannerData(
       }
 
       try {
-        // Get existing checklist items for this date + category
-        const { data: existingItems } = await supabase
-          .from("checklists")
-          .select("id")
-          .eq("user_id", user.id)
-          .eq("date", date)
-          .eq("category", category)
-
-        const existingIds = new Set(existingItems?.map((item) => item.id) || [])
-        const newIds = new Set(items.map((item) => item.id))
-
-        // Delete items that are no longer in the list
-        const toDelete = [...existingIds].filter((id) => !newIds.has(id))
-        if (toDelete.length > 0) {
-          await supabase.from("checklists").delete().in("id", toDelete)
-        }
-
-        // Upsert all current items
-        for (const item of items) {
-          const isExisting = existingIds.has(item.id)
-          
-          if (isExisting) {
-            // Update existing item
-            const { error } = await supabase
-              .from("checklists")
-              .update({
-                text: item.text,
-                completed: item.completed,
-                position: item.order,
-                due_time: item.due_time || null,
-                updated_at: new Date().toISOString(),
-              })
-              .eq("id", item.id)
-
-            if (error) throw error
-          } else {
-            // Insert new item
-            const { error } = await supabase.from("checklists").insert({
-              id: item.id,
-              user_id: user.id,
-              date,
-              slot_id: date, // Use date as slot_id for simplicity
-              text: item.text,
-              completed: item.completed,
-              position: item.order,
-              due_time: item.due_time || null,
-              category,
-            })
-
-            if (error) throw error
-          }
-        }
-
+        const res = await fetch("/api/checklists", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ date, category, items }),
+        })
+        if (!res.ok) throw new Error("Failed to save checklist")
         setStatus("saved")
       } catch (error) {
         console.error("Error saving checklist:", error)
         setStatus("offline")
       }
     },
-    [user, weekKey, checklists, supabase, category]
+    [user, weekKey, checklists, category],
   )
 
   // Save due time for a checklist item
@@ -498,19 +311,18 @@ export function usePlannerData(
       if (!user) return
 
       try {
-        const { error } = await supabase
-          .from("checklists")
-          .update({ due_time: dueTime, updated_at: new Date().toISOString() })
-          .eq("id", checklistId)
+        const res = await fetch("/api/checklists", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: checklistId, due_time: dueTime }),
+        })
+        if (!res.ok) throw new Error("Failed to save due time")
 
-        if (error) throw error
-
-        // Update local state
         setChecklists((prev) => {
           const updated = { ...prev }
           for (const date in updated) {
             updated[date] = updated[date].map((item) =>
-              item.id === checklistId ? { ...item, due_time: dueTime } : item
+              item.id === checklistId ? { ...item, due_time: dueTime } : item,
             )
           }
           return updated
@@ -519,7 +331,7 @@ export function usePlannerData(
         console.error("Error saving due time:", error)
       }
     },
-    [user, supabase]
+    [user],
   )
 
   // Save a reminder for a checklist item
@@ -536,16 +348,13 @@ export function usePlannerData(
 
         if (response.ok) {
           const { reminder } = await response.json()
-          setReminders((prev) => ({
-            ...prev,
-            [checklistId]: reminder,
-          }))
+          setReminders((prev) => ({ ...prev, [checklistId]: reminder }))
         }
       } catch (error) {
         console.error("Error saving reminder:", error)
       }
     },
-    [user]
+    [user],
   )
 
   // Remove a reminder for a checklist item
@@ -571,17 +380,16 @@ export function usePlannerData(
         console.error("Error removing reminder:", error)
       }
     },
-    [user]
+    [user],
   )
 
   // Sign out
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut()
-    setUser(null)
+    await authClient.signOut()
     setWeekData({})
     setChecklists({})
     setReminders({})
-  }, [supabase.auth])
+  }, [])
 
   return {
     user,

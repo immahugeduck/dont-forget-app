@@ -1,38 +1,41 @@
-import { NextRequest, NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { NextResponse, type NextRequest } from "next/server"
+import { db } from "@/lib/db"
+import { userCategories } from "@/lib/db/schema"
+import { getUserId } from "@/lib/auth-helpers"
+import { and, asc, desc, eq } from "drizzle-orm"
+
+type CategoryRow = typeof userCategories.$inferSelect
+
+function toCategory(r: CategoryRow) {
+  return {
+    id: r.id,
+    user_id: r.userId,
+    name: r.name,
+    color: r.color,
+    icon: r.icon,
+    position: r.position,
+    created_at: r.createdAt,
+  }
+}
 
 export async function GET() {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
+  const userId = await getUserId()
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  const { data: categories, error } = await supabase
-    .from("user_categories")
-    .select("*")
-    .eq("user_id", user.id)
-    .order("position", { ascending: true })
+  const rows = await db
+    .select()
+    .from(userCategories)
+    .where(eq(userCategories.userId, userId))
+    .orderBy(asc(userCategories.position))
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  return NextResponse.json({ categories })
+  return NextResponse.json({ categories: rows.map(toCategory) })
 }
 
 export async function POST(request: NextRequest) {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
+  const userId = await getUserId()
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
@@ -43,48 +46,45 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 })
   }
 
-  // Get the highest position to add new category at the end
-  const { data: existingCategories } = await supabase
-    .from("user_categories")
-    .select("position")
-    .eq("user_id", user.id)
-    .order("position", { ascending: false })
+  const trimmed = name.trim()
+
+  // Prevent duplicate category names per user.
+  const [dupe] = await db
+    .select({ id: userCategories.id })
+    .from(userCategories)
+    .where(and(eq(userCategories.userId, userId), eq(userCategories.name, trimmed)))
     .limit(1)
 
-  const nextPosition = existingCategories && existingCategories.length > 0 
-    ? existingCategories[0].position + 1 
-    : 0
+  if (dupe) {
+    return NextResponse.json({ error: "Category already exists" }, { status: 409 })
+  }
 
-  const { data: category, error } = await supabase
-    .from("user_categories")
-    .insert({
-      user_id: user.id,
-      name: name.trim(),
+  const [last] = await db
+    .select({ position: userCategories.position })
+    .from(userCategories)
+    .where(eq(userCategories.userId, userId))
+    .orderBy(desc(userCategories.position))
+    .limit(1)
+
+  const nextPosition = last ? last.position + 1 : 0
+
+  const [category] = await db
+    .insert(userCategories)
+    .values({
+      userId,
+      name: trimmed,
       color: color || "#8b5cf6",
       icon: icon || "folder",
       position: nextPosition,
     })
-    .select()
-    .single()
+    .returning()
 
-  if (error) {
-    if (error.code === "23505") {
-      return NextResponse.json({ error: "Category already exists" }, { status: 409 })
-    }
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
-
-  return NextResponse.json({ category }, { status: 201 })
+  return NextResponse.json({ category: toCategory(category) }, { status: 201 })
 }
 
 export async function PUT(request: NextRequest) {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
+  const userId = await getUserId()
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
@@ -101,29 +101,22 @@ export async function PUT(request: NextRequest) {
   if (icon !== undefined) updateData.icon = icon
   if (position !== undefined) updateData.position = position
 
-  const { data: category, error } = await supabase
-    .from("user_categories")
-    .update(updateData)
-    .eq("id", id)
-    .eq("user_id", user.id)
-    .select()
-    .single()
+  const [category] = await db
+    .update(userCategories)
+    .set(updateData)
+    .where(and(eq(userCategories.id, id), eq(userCategories.userId, userId)))
+    .returning()
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
+  if (!category) {
+    return NextResponse.json({ error: "Category not found" }, { status: 404 })
   }
 
-  return NextResponse.json({ category })
+  return NextResponse.json({ category: toCategory(category) })
 }
 
 export async function DELETE(request: NextRequest) {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-
-  if (!user) {
+  const userId = await getUserId()
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
@@ -134,15 +127,7 @@ export async function DELETE(request: NextRequest) {
     return NextResponse.json({ error: "Category ID is required" }, { status: 400 })
   }
 
-  const { error } = await supabase
-    .from("user_categories")
-    .delete()
-    .eq("id", id)
-    .eq("user_id", user.id)
-
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 })
-  }
+  await db.delete(userCategories).where(and(eq(userCategories.id, id), eq(userCategories.userId, userId)))
 
   return NextResponse.json({ success: true })
 }

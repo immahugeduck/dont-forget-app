@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
-import { createClient } from "@/lib/supabase/client"
+import { authClient } from "@/lib/auth-client"
 
 export interface UserCategory {
   id: string
@@ -22,10 +22,12 @@ const DEFAULT_CATEGORY: Omit<UserCategory, "id" | "user_id" | "created_at"> = {
 }
 
 export function useCategories() {
+  const { data: sessionData, isPending } = authClient.useSession()
+  const user = sessionData?.user ?? null
+
   const [categories, setCategories] = useState<UserCategory[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const supabase = createClient()
 
   // Load categories
   const loadCategories = useCallback(async () => {
@@ -47,7 +49,7 @@ export function useCategories() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(DEFAULT_CATEGORY),
         })
-        
+
         if (createResponse.ok) {
           const { category } = await createResponse.json()
           setCategories([category])
@@ -86,39 +88,38 @@ export function useCategories() {
   }, [])
 
   // Update a category
-  const updateCategory = useCallback(async (
-    id: string, 
-    updates: Partial<Pick<UserCategory, "name" | "color" | "icon" | "position">>
-  ) => {
-    try {
-      const response = await fetch("/api/categories", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, ...updates }),
-      })
+  const updateCategory = useCallback(
+    async (
+      id: string,
+      updates: Partial<Pick<UserCategory, "name" | "color" | "icon" | "position">>,
+    ) => {
+      try {
+        const response = await fetch("/api/categories", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id, ...updates }),
+        })
 
-      const data = await response.json()
+        const data = await response.json()
 
-      if (!response.ok) {
-        throw new Error(data.error || "Failed to update category")
+        if (!response.ok) {
+          throw new Error(data.error || "Failed to update category")
+        }
+
+        setCategories((prev) => prev.map((cat) => (cat.id === id ? data.category : cat)))
+        return data.category
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Unknown error")
+        return null
       }
-
-      setCategories((prev) =>
-        prev.map((cat) => (cat.id === id ? data.category : cat))
-      )
-      return data.category
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error")
-      return null
-    }
-  }, [])
+    },
+    [],
+  )
 
   // Delete a category
   const deleteCategory = useCallback(async (id: string) => {
     try {
-      const response = await fetch(`/api/categories?id=${id}`, {
-        method: "DELETE",
-      })
+      const response = await fetch(`/api/categories?id=${id}`, { method: "DELETE" })
 
       if (!response.ok) {
         const data = await response.json()
@@ -133,27 +134,16 @@ export function useCategories() {
     }
   }, [])
 
-  // Load categories on auth state change
+  // Load categories based on auth state
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
-      if (event === "SIGNED_IN") {
-        loadCategories()
-      } else if (event === "SIGNED_OUT") {
-        setCategories([])
-      }
-    })
-
-    // Initial load
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) {
-        loadCategories()
-      } else {
-        setIsLoading(false)
-      }
-    })
-
-    return () => subscription.unsubscribe()
-  }, [supabase.auth, loadCategories])
+    if (isPending) return
+    if (user) {
+      loadCategories()
+    } else {
+      setCategories([])
+      setIsLoading(false)
+    }
+  }, [user, isPending, loadCategories])
 
   return {
     categories,

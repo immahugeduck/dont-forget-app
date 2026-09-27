@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { db } from "@/lib/db"
+import { pushSubscriptions } from "@/lib/db/schema"
+import { getUserId } from "@/lib/auth-helpers"
+import { and, eq } from "drizzle-orm"
 
 /** Shape of the serialized PushSubscription received from the client */
 interface SerializedPushSubscription {
@@ -11,10 +14,8 @@ interface SerializedPushSubscription {
 }
 
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-
-  if (!user) {
+  const userId = await getUserId()
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
@@ -38,34 +39,35 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing subscription keys" }, { status: 400 })
   }
 
-  const { error } = await supabase
-    .from("push_subscriptions")
-    .upsert(
-      {
-        user_id: user.id,
-        endpoint: subscription.endpoint,
-        p256dh,
-        auth,
-        reminder_time: reminderTime,
-        enabled: true,
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: "user_id,endpoint" }
-    )
+  // Upsert by (user_id, endpoint).
+  const [existing] = await db
+    .select({ id: pushSubscriptions.id })
+    .from(pushSubscriptions)
+    .where(and(eq(pushSubscriptions.userId, userId), eq(pushSubscriptions.endpoint, subscription.endpoint)))
+    .limit(1)
 
-  if (error) {
-    console.error("Error saving push subscription:", error)
-    return NextResponse.json({ error: "Failed to save subscription" }, { status: 500 })
+  if (existing) {
+    await db
+      .update(pushSubscriptions)
+      .set({ p256dh, auth, reminderTime, enabled: true, updatedAt: new Date() })
+      .where(eq(pushSubscriptions.id, existing.id))
+  } else {
+    await db.insert(pushSubscriptions).values({
+      userId,
+      endpoint: subscription.endpoint,
+      p256dh,
+      auth,
+      reminderTime,
+      enabled: true,
+    })
   }
 
   return NextResponse.json({ success: true })
 }
 
 export async function DELETE(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-
-  if (!user) {
+  const userId = await getUserId()
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
@@ -77,30 +79,20 @@ export async function DELETE(request: Request) {
   }
 
   const { endpoint } = body
-
   if (!endpoint) {
     return NextResponse.json({ error: "Missing endpoint" }, { status: 400 })
   }
 
-  const { error } = await supabase
-    .from("push_subscriptions")
-    .delete()
-    .eq("user_id", user.id)
-    .eq("endpoint", endpoint)
-
-  if (error) {
-    console.error("Error removing push subscription:", error)
-    return NextResponse.json({ error: "Failed to remove subscription" }, { status: 500 })
-  }
+  await db
+    .delete(pushSubscriptions)
+    .where(and(eq(pushSubscriptions.userId, userId), eq(pushSubscriptions.endpoint, endpoint)))
 
   return NextResponse.json({ success: true })
 }
 
 export async function PATCH(request: Request) {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-
-  if (!user) {
+  const userId = await getUserId()
+  if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
@@ -112,21 +104,14 @@ export async function PATCH(request: Request) {
   }
 
   const { endpoint, reminderTime } = body
-
   if (!endpoint || !reminderTime) {
     return NextResponse.json({ error: "Missing endpoint or reminderTime" }, { status: 400 })
   }
 
-  const { error } = await supabase
-    .from("push_subscriptions")
-    .update({ reminder_time: reminderTime, updated_at: new Date().toISOString() })
-    .eq("user_id", user.id)
-    .eq("endpoint", endpoint)
-
-  if (error) {
-    console.error("Error updating reminder time:", error)
-    return NextResponse.json({ error: "Failed to update reminder time" }, { status: 500 })
-  }
+  await db
+    .update(pushSubscriptions)
+    .set({ reminderTime, updatedAt: new Date() })
+    .where(and(eq(pushSubscriptions.userId, userId), eq(pushSubscriptions.endpoint, endpoint)))
 
   return NextResponse.json({ success: true })
 }
