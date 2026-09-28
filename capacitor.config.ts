@@ -13,7 +13,7 @@ const config: CapacitorConfig = {
   // needs to exist and is not shipped to devices when server.url is set.
   webDir: "public",
   server: {
-    url: "https://dont-forget-app.vercel.app",
+    url: "https://dont-forget-app-zak-kortesmakis-projects.vercel.app",
     cleartext: false,
   },
   android: {

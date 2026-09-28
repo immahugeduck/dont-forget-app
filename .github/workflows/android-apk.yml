@@ -1,0 +1,72 @@
+name: Build Android APK
+
+# Builds the Capacitor Android shell into an installable APK and publishes it
+# as the "android-latest" GitHub Release so it can be downloaded on a phone.
+on:
+  push:
+    branches: [main, Remember-App, ccr-13cb7a03-0cxxut]
+    paths:
+      - "android/**"
+      - "capacitor.config.ts"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/android-apk.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install JS dependencies
+        run: npm ci
+
+      # Copies capacitor.config.ts and the plugin list into the android/ project.
+      - name: Sync Capacitor
+        run: npx cap sync android
+
+      # Optional: native push needs Firebase's google-services.json. Store its
+      # contents in a repo secret named GOOGLE_SERVICES_JSON to enable it.
+      - name: Add google-services.json
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        if: env.GOOGLE_SERVICES_JSON != ''
+        run: echo "$GOOGLE_SERVICES_JSON" > android/app/google-services.json
+
+      - name: Build debug APK
+        working-directory: android
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk dont-forget.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dont-forget-apk
+          path: dont-forget.apk
+
+      - name: Publish to "android-latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete android-latest --yes --cleanup-tag || true
+          gh release create android-latest dont-forget.apk \
+            --target "$GITHUB_SHA" \
+            --title "Don't Forget - Android (latest)" \
+            --notes "Built from ${GITHUB_REF_NAME} @ ${GITHUB_SHA::7}. Download dont-forget.apk on your phone and open it to install."
