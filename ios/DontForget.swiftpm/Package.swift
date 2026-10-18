@@ -18,5 +18,11 @@ let package = Package(
             supportedInterfaceOrientations: [.portrait, .landscapeLeft, .landscapeRight]
         )
     ],
-    targets: [.executableTarget(name: "AppModule", path: ".")]
+    targets: [
+        .executableTarget(
+            name: "AppModule",
+            path: ".",
+            sources: ["DontForgetApp.swift", "ContentView.swift", "PlannerModels.swift"]
+        )
+    ]
 )

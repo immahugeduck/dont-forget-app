@@ -32,4 +32,6 @@ All four `.swift` files passed tree-sitter Swift syntax parsing. This does not c
 
 ## Release status
 
+The first iPad attempt reported “ContentView.swift not in a target” in the preview/runtime window. This is a confirmed import/indexing failure, not a successful build. The revision lists source files explicitly and ships under a fresh `.swiftpm` directory name to avoid reusing the imported package location. Its effectiveness remains to be verified on-device. The original `path: "."` layout is supported by Swift Package Manager, so the screenshot alone does not establish the exact underlying cause.
+
 Ready for the first user-operated iPad build and interaction test. Cloud account data and reminders are not part of this milestone. App Store readiness has not been assessed.

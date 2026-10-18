@@ -4,9 +4,17 @@ This is the first native SwiftUI milestone, based on the planner in the `Remembe
 
 ## Open on your iPad
 
+### If you saw “ContentView.swift not in a target”
+
+The revised manifest explicitly lists all three application source files. That addresses ambiguous source discovery; it has not yet been verified on the affected iPad. A stale project index or an import problem can produce the same message.
+
+Tap **Stop**, return to the editor, and open the newly extracted `DontForget-Fixed.swiftpm` package from the corrected ZIP. Keep the previous project until the replacement opens successfully. Do not choose **Delete App Data & Restart**; removing data does not repair target membership.
+
+If the same message remains, use the fresh-App paste fallback below. Swift Playground then creates and manages the package and target itself. This is the preferred next diagnostic step over repeatedly restarting the imported package.
+
 1. Download `DontForget-iPad-Playground.zip` and choose **Save to Files**.
 2. In Apple’s **Files** app, tap the ZIP once to extract it.
-3. Open the extracted folder and tap **DontForget.swiftpm**. If Files does not open it directly, launch Swift Playground, choose **Browse**, and locate `DontForget.swiftpm`.
+3. Open the extracted folder and tap **DontForget-Fixed.swiftpm**. If Files does not open it directly, launch Swift Playground, choose **Browse**, and locate `DontForget-Fixed.swiftpm`.
 4. Choose **Run App** (the play button above the editor). The first build may take a moment.
 5. Add a test task, close the running app, run it again, and check the task is still there.
 
