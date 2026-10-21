@@ -1,95 +1,120 @@
 "use client"
 
 import { useEffect } from "react"
+import { OPEN_DATE_EVENT, REMINDERS_CHANGED_EVENT } from "@/lib/native-reminders"
+
+/** Navigate to an in-app URL from a notification tap. */
+function openFromNotification(url: string | undefined) {
+  if (!url) return
+  try {
+    const target = new URL(url, window.location.origin)
+    if (target.origin !== window.location.origin) return
+    const date = target.searchParams.get("date")
+    if (target.pathname === "/" && window.location.pathname === "/" && date) {
+      // Already on the planner: jump to the day without a reload.
+      window.history.replaceState(null, "", target.pathname + target.search)
+      window.dispatchEvent(new CustomEvent(OPEN_DATE_EVENT, { detail: { date } }))
+    } else {
+      window.location.assign(target.pathname + target.search + target.hash)
+    }
+  } catch {
+    // ignore malformed URLs
+  }
+}
 
 /**
- * Native-only behavior for the Capacitor Android shell.
- * On the web (browser / PWA) Capacitor.isNativePlatform() is false, so this
- * component does nothing and adds no overhead. It only runs when the app is
- * loaded inside the native Android WebView.
+ * Native-only behavior for the Capacitor Android shell. On the web
+ * Capacitor.isNativePlatform() is false and this does nothing.
  */
 export function NativeShell() {
   useEffect(() => {
-    let cleanup: (() => void) | undefined
+    const removers: Array<() => void> = []
+    let disposed = false
 
     async function init() {
       const { Capacitor } = await import("@capacitor/core")
       if (!Capacitor.isNativePlatform()) return
 
-      const [{ StatusBar, Style }, { SplashScreen }, { App }, { PushNotifications }] = await Promise.all([
+      const [{ StatusBar, Style }, { SplashScreen }, { App }, { LocalNotifications }, reminders] = await Promise.all([
         import("@capacitor/status-bar"),
         import("@capacitor/splash-screen"),
         import("@capacitor/app"),
-        import("@capacitor/push-notifications"),
+        import("@capacitor/local-notifications"),
+        import("@/lib/native-reminders"),
       ])
+      if (disposed) return
 
-      // Match the app's dark chrome.
       try {
         await StatusBar.setStyle({ style: Style.Dark })
         await StatusBar.setBackgroundColor({ color: "#0f0f11" })
       } catch {
-        // StatusBar plugin is a no-op on unsupported surfaces.
+        /* ignore */
       }
-
-      // Hide the splash once the web content has mounted.
       try {
         await SplashScreen.hide()
       } catch {
-        // ignore
+        /* ignore */
       }
 
-      // Android 8+ requires a notification channel or background/system-tray
-      // notifications silently fail to display. This id matches the channelId
-      // the server sends via FCM (lib/fcm.ts) and the manifest default channel.
+      await reminders.ensureChannel()
+
+      // Android back button: go back, or minimize instead of closing.
+      const back = await App.addListener("backButton", ({ canGoBack }) => {
+        if (canGoBack) window.history.back()
+        else App.minimizeApp()
+      })
+      removers.push(() => back.remove())
+
+      // Tapping a local reminder opens its day.
+      const tap = await LocalNotifications.addListener("localNotificationActionPerformed", (action) => {
+        openFromNotification((action.notification.extra as { url?: string } | undefined)?.url)
+      })
+      removers.push(() => tap.remove())
+
+      // Reschedule whenever the app comes back to the foreground…
+      const resume = await App.addListener("resume", () => {
+        void reminders.syncReminders()
+      })
+      removers.push(() => resume.remove())
+
+      // …and shortly after the user changes their data.
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const onChange = () => {
+        clearTimeout(timer)
+        timer = setTimeout(() => void reminders.syncReminders(), 1500)
+      }
+      window.addEventListener(REMINDERS_CHANGED_EVENT, onChange)
+      window.addEventListener("online", onChange)
+      removers.push(() => {
+        clearTimeout(timer)
+        window.removeEventListener(REMINDERS_CHANGED_EVENT, onChange)
+        window.removeEventListener("online", onChange)
+      })
+
+      void reminders.syncReminders()
+
+      // Remote push (FCM) only when the server has Firebase set up; calling
+      // into Firebase without it would crash the app.
       try {
-        await PushNotifications.createChannel({
-          id: "default",
-          name: "Reminders",
-          description: "Daily planning and task reminders",
-          importance: 5, // HIGH — heads-up notifications
-          visibility: 1, // PUBLIC on the lock screen
-        })
+        const res = await fetch("/api/notifications/config", { cache: "no-store" })
+        const config = res.ok ? ((await res.json()) as { fcm?: boolean }) : { fcm: false }
+        if (config.fcm && !disposed) {
+          const { PushNotifications } = await import("@capacitor/push-notifications")
+          const pushTap = await PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
+            openFromNotification((action.notification.data as { url?: string } | undefined)?.url)
+          })
+          removers.push(() => pushTap.remove())
+        }
       } catch {
-        // createChannel is Android-only; ignore elsewhere.
-      }
-
-      // Android hardware back button: go back in history, or minimize the app
-      // instead of killing it when there is nowhere left to go.
-      const handle = await App.addListener("backButton", ({ canGoBack }) => {
-        if (canGoBack) {
-          window.history.back()
-        } else {
-          App.minimizeApp()
-        }
-      })
-
-      // When the user taps a push notification, navigate to the URL carried in
-      // its data payload (defaults to home). Works whether the app was in the
-      // background or fully closed.
-      const tapHandle = await PushNotifications.addListener("pushNotificationActionPerformed", (action) => {
-        const url = (action.notification.data as { url?: string } | undefined)?.url
-        if (url) {
-          try {
-            const target = new URL(url, window.location.origin)
-            if (target.origin === window.location.origin) {
-              window.location.assign(target.pathname + target.search + target.hash)
-            }
-          } catch {
-            // ignore malformed URLs
-          }
-        }
-      })
-
-      cleanup = () => {
-        handle.remove()
-        tapHandle.remove()
+        /* offline or not configured */
       }
     }
 
-    init()
+    void init()
 
     return () => {
-      cleanup?.()
+      disposed = true
+      removers.forEach((r) => r())
     }
   }, [])
 

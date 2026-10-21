@@ -1,23 +1,10 @@
 import { NextResponse } from "next/server"
-import webpush from "web-push"
+import { getWebPush } from "@/lib/webpush"
 import { db } from "@/lib/db"
 import { pushSubscriptions, deviceTokens } from "@/lib/db/schema"
 import { getUserId } from "@/lib/auth-helpers"
 import { and, eq } from "drizzle-orm"
 import { isFcmConfigured, sendFcmToTokens } from "@/lib/fcm"
-
-// Lazy VAPID configuration - only configure when actually sending
-let vapidConfigured = false
-function ensureVapidConfigured() {
-  if (!vapidConfigured && process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-    webpush.setVapidDetails(
-      `mailto:${process.env.VAPID_EMAIL ?? "notifications@example.com"}`,
-      process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
-      process.env.VAPID_PRIVATE_KEY,
-    )
-    vapidConfigured = true
-  }
-}
 
 export async function POST(request: Request) {
   const userId = await getUserId()
@@ -35,7 +22,7 @@ export async function POST(request: Request) {
   // --- Native (FCM) test path: the native app sends its device token ---
   if (body.token) {
     if (!isFcmConfigured()) {
-      return NextResponse.json({ error: "FCM not configured (FIREBASE_SERVICE_ACCOUNT missing)" }, { status: 500 })
+      return NextResponse.json({ error: "FCM not configured (FIREBASE_SERVICE_ACCOUNT missing)" }, { status: 503 })
     }
 
     // Only allow testing a token that belongs to this user.
@@ -66,11 +53,10 @@ export async function POST(request: Request) {
   }
 
   // --- Web push path ---
-  if (!process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
-    return NextResponse.json({ error: "VAPID keys not configured" }, { status: 500 })
+  const webpush = getWebPush()
+  if (!webpush) {
+    return NextResponse.json({ error: "Web push is not configured on the server" }, { status: 503 })
   }
-
-  ensureVapidConfigured()
 
   const { endpoint } = body
   if (!endpoint) {

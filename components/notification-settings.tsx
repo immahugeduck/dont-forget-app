@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { Bell, BellOff, Clock, TestTube, X, Loader2 } from "lucide-react"
+import { useEffect, useState } from "react"
+import { Bell, BellOff, Clock, TestTube, X, Loader2, AlarmClock } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Switch } from "@/components/ui/switch"
 import { useNotifications } from "@/hooks/use-notifications"
@@ -13,6 +13,10 @@ interface NotificationSettingsProps {
 export function NotificationSettings({ onClose }: NotificationSettingsProps) {
   const {
     isSupported,
+    unsupportedReason,
+    isNative,
+    exactAlarms,
+    fixExactAlarms,
     permission,
     isSubscribed,
     isLoading,
@@ -24,6 +28,7 @@ export function NotificationSettings({ onClose }: NotificationSettingsProps) {
   } = useNotifications()
 
   const [localTime, setLocalTime] = useState(reminderTime)
+  useEffect(() => setLocalTime(reminderTime), [reminderTime])
   const [testStatus, setTestStatus] = useState<"idle" | "sending" | "sent" | "error">("idle")
 
   const handleToggle = async (enabled: boolean) => {
@@ -62,7 +67,17 @@ export function NotificationSettings({ onClose }: NotificationSettingsProps) {
       </div>
 
       {/* Not supported */}
-      {!isSupported && (
+      {!isSupported && !isLoading && unsupportedReason === "server" && (
+        <div className="text-sm text-muted-foreground bg-secondary/50 rounded-lg p-3">
+          <p className="font-medium mb-1">Browser notifications aren&apos;t set up yet</p>
+          <p className="text-xs">
+            Web push isn&apos;t configured on the server. The Android app has its own on-device reminders that work
+            without it.
+          </p>
+        </div>
+      )}
+
+      {!isSupported && !isLoading && unsupportedReason !== "server" && (
         <div className="text-sm text-muted-foreground bg-secondary/50 rounded-lg p-3">
           <p className="font-medium mb-1">Push notifications not supported</p>
           <p className="text-xs">
@@ -77,8 +92,9 @@ export function NotificationSettings({ onClose }: NotificationSettingsProps) {
         <div className="text-sm text-muted-foreground bg-secondary/50 rounded-lg p-3">
           <p className="font-medium mb-1">Notifications blocked</p>
           <p className="text-xs">
-            You've blocked notifications for this site. To enable them, go to your browser settings and allow
-            notifications for this site, then reload the page.
+            {isNative
+              ? "Notifications are turned off for Don't Forget. Turn them on in Android Settings → Apps → Don't Forget → Notifications, then come back."
+              : "You've blocked notifications for this site. To enable them, go to your browser settings and allow notifications for this site, then reload the page."}
           </p>
         </div>
       )}
@@ -97,7 +113,13 @@ export function NotificationSettings({ onClose }: NotificationSettingsProps) {
               <div>
                 <p className="text-sm font-medium">Daily reminder</p>
                 <p className="text-xs text-muted-foreground">
-                  {isSubscribed ? "You'll get a notification each day" : "Get a daily nudge to plan your day"}
+                  {isNative
+                    ? isSubscribed
+                      ? "Daily nudge plus reminders for tasks with a time"
+                      : "Get a daily nudge and reminders for timed tasks"
+                    : isSubscribed
+                      ? "You'll get a notification each day"
+                      : "Get a daily nudge to plan your day"}
                 </p>
               </div>
             </div>
@@ -114,7 +136,7 @@ export function NotificationSettings({ onClose }: NotificationSettingsProps) {
               <Clock className="w-4 h-4 text-muted-foreground flex-shrink-0" />
               <div className="flex-1">
                 <p className="text-sm font-medium">Reminder time</p>
-                <p className="text-xs text-muted-foreground">Daily nudge at this time (UTC — adjust for your timezone)</p>
+                <p className="text-xs text-muted-foreground">{isNative ? "Daily nudge at this time" : "Daily nudge at this time (your local time, may arrive up to 15 min late)"}</p>
               </div>
               <input
                 type="time"
@@ -122,6 +144,21 @@ export function NotificationSettings({ onClose }: NotificationSettingsProps) {
                 onChange={(e) => handleTimeChange(e.target.value)}
                 className="text-sm bg-secondary border border-border rounded-lg px-2 py-1 text-foreground"
               />
+            </div>
+          )}
+
+          {/* Android 12+: exact alarms keep reminders on time */}
+          {isNative && isSubscribed && !exactAlarms && (
+            <div className="flex items-start gap-3 rounded-lg bg-secondary/50 p-3">
+              <AlarmClock className="w-4 h-4 mt-0.5 text-amber-500 flex-shrink-0" />
+              <div className="flex-1">
+                <p className="text-xs text-muted-foreground">
+                  Android may delay reminders unless &quot;Alarms &amp; reminders&quot; is allowed for this app.
+                </p>
+                <Button variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => void fixExactAlarms()}>
+                  Allow exact reminders
+                </Button>
+              </div>
             </div>
           )}
 

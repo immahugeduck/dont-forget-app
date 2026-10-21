@@ -13,6 +13,10 @@ interface SerializedPushSubscription {
   }
 }
 
+
+// Zero-padded 24h "HH:MM" (UTC); the cron compares these as strings.
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/
+
 export async function POST(request: Request) {
   const userId = await getUserId()
   if (!userId) {
@@ -27,6 +31,9 @@ export async function POST(request: Request) {
   }
 
   const { subscription, reminderTime = "08:00" } = body
+  if (!TIME_RE.test(reminderTime)) {
+    return NextResponse.json({ error: "reminderTime must be HH:MM" }, { status: 400 })
+  }
 
   if (!subscription?.endpoint) {
     return NextResponse.json({ error: "Missing subscription endpoint" }, { status: 400 })
@@ -106,6 +113,9 @@ export async function PATCH(request: Request) {
   const { endpoint, reminderTime } = body
   if (!endpoint || !reminderTime) {
     return NextResponse.json({ error: "Missing endpoint or reminderTime" }, { status: 400 })
+  }
+  if (!TIME_RE.test(reminderTime)) {
+    return NextResponse.json({ error: "reminderTime must be HH:MM" }, { status: 400 })
   }
 
   await db

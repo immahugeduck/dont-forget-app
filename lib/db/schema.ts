@@ -84,6 +84,8 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   auth: text("auth").notNull(),
   reminderTime: text("reminder_time").notNull().default("08:00"),
   enabled: boolean("enabled").notNull().default(true),
+  // UTC day (YYYY-MM-DD) the daily reminder was last delivered.
+  lastSentOn: date("last_sent_on", { mode: "string" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 })
@@ -98,6 +100,8 @@ export const deviceTokens = pgTable("device_tokens", {
   platform: text("platform").notNull().default("android"),
   reminderTime: text("reminder_time").notNull().default("08:00"),
   enabled: boolean("enabled").notNull().default(true),
+  // UTC day (YYYY-MM-DD) the daily reminder was last delivered.
+  lastSentOn: date("last_sent_on", { mode: "string" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 })

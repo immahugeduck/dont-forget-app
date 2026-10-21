@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useCallback, useMemo } from "react"
+import { useState, useCallback, useMemo, useEffect } from "react"
+import { OPEN_DATE_EVENT } from "@/lib/native-reminders"
 import { WeekNavigator } from "@/components/week-navigator"
 import { CategoryTabs } from "@/components/category-tabs"
 import { DayCard } from "@/components/day-card"
@@ -41,7 +42,6 @@ const ALL_SLOTS = [...DAYS_OF_WEEK, GOAL_SLOT]
 // Calendar boundaries
 const MIN_DATE = new Date(2020, 0, 1) // January 1, 2020
 const MAX_DATE = new Date(2030, 11, 31) // December 31, 2030
-const TODAY = new Date() // Current date
 
 function getWeekNumber(date: Date): number {
   const temp = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
@@ -91,7 +91,7 @@ function isSameDay(d1: Date, d2: Date): boolean {
 }
 
 export function PlannerPage() {
-  const [currentWeekStart, setCurrentWeekStart] = useState(() => getWeekStartDate(TODAY))
+  const [currentWeekStart, setCurrentWeekStart] = useState(() => getWeekStartDate(new Date()))
   const [categoryId, setCategoryId] = useState<string | null>(null)
   const [activeTag, setActiveTag] = useState<string | null>(null)
   const [showCalendar, setShowCalendar] = useState(false)
@@ -100,6 +100,46 @@ export function PlannerPage() {
   const [showWeather, setShowWeather] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
   const [focusedDate, setFocusedDate] = useState<Date | null>(null)
+
+  // "Today" must roll over at midnight, including when the app is resumed
+  // from the background the next day.
+  const [today, setToday] = useState(() => new Date())
+  useEffect(() => {
+    const refresh = () =>
+      setToday((prev) => {
+        const now = new Date()
+        return isSameDay(prev, now) ? prev : now
+      })
+    const timer = setInterval(refresh, 60_000)
+    document.addEventListener("visibilitychange", refresh)
+    window.addEventListener("focus", refresh)
+    return () => {
+      clearInterval(timer)
+      document.removeEventListener("visibilitychange", refresh)
+      window.removeEventListener("focus", refresh)
+    }
+  }, [])
+
+  // Open a specific day from a notification link (/?date=YYYY-MM-DD), either
+  // on load or when a notification is tapped while the app is open.
+  useEffect(() => {
+    const openDate = (value: string | null) => {
+      const m = value ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null
+      if (!m) return
+      const date = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+      if (isNaN(date.getTime()) || date < MIN_DATE || date > MAX_DATE) return
+      setCurrentWeekStart(getWeekStartDate(date))
+      setFocusedDate(date)
+      setShowCalendar(false)
+      setShowStats(false)
+      setShowWeather(false)
+      setShowNotifications(false)
+    }
+    openDate(new URLSearchParams(window.location.search).get("date"))
+    const onOpen = (e: Event) => openDate((e as CustomEvent<{ date?: string }>).detail?.date ?? null)
+    window.addEventListener(OPEN_DATE_EVENT, onOpen)
+    return () => window.removeEventListener(OPEN_DATE_EVENT, onOpen)
+  }, [])
 
   const {
     categories,
@@ -160,7 +200,7 @@ export function PlannerPage() {
   }, [checklists])
 
   // Load checklist tags when checklist items change
-  useMemo(() => {
+  useEffect(() => {
     if (allChecklistIds.length > 0) {
       loadChecklistTags(allChecklistIds)
     }
@@ -200,7 +240,7 @@ export function PlannerPage() {
   }, [currentWeekStart])
 
   const handleGoToToday = useCallback(() => {
-    setCurrentWeekStart(getWeekStartDate(TODAY))
+    setCurrentWeekStart(getWeekStartDate(new Date()))
   }, [])
 
   const handleSelectDate = useCallback((date: Date) => {
@@ -209,7 +249,7 @@ export function PlannerPage() {
   }, [])
 
   const handleOpenFocusedDay = useCallback(() => {
-    setFocusedDate(new Date(TODAY))
+    setFocusedDate(new Date())
     setShowCalendar(false)
     setShowStats(false)
     setShowWeather(false)
@@ -497,7 +537,7 @@ export function PlannerPage() {
           {ALL_SLOTS.map((slot, index) => {
             const isGoals = slot.id === "goals"
             const slotDate = isGoals ? undefined : weekDates[index]
-            const isToday = slotDate ? isSameDay(slotDate, TODAY) : false
+            const isToday = slotDate ? isSameDay(slotDate, today) : false
             
             // Get date key for content, checklist and weather
             const dateKey = slotDate 
@@ -547,7 +587,7 @@ export function PlannerPage() {
         onJumpToToday={() => {
           handleGoToToday()
           setTimeout(() => {
-            const dayIndex = TODAY.getDay()
+            const dayIndex = today.getDay()
             const dayId = DAYS_OF_WEEK[dayIndex === 0 ? 6 : dayIndex - 1].id
             const todayEl = document.getElementById(`day-${dayId}`)
             todayEl?.scrollIntoView({ behavior: "smooth", block: "center" })
