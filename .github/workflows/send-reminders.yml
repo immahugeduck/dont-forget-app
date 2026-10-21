@@ -1,0 +1,34 @@
+name: Send reminders
+
+# Vercel's Hobby plan only allows a once-a-day cron (08:00 UTC), so web push
+# daily nudges and task reminders would arrive hours late. This calls the same
+# endpoint every 15 minutes; the endpoint sends each daily nudge once per day.
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: send-reminders
+  cancel-in-progress: false
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Call /api/notifications/send
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SEND_URL: ${{ vars.REMINDERS_SEND_URL || 'https://dont-forget-app-nine.vercel.app/api/notifications/send' }}
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::warning::CRON_SECRET repo secret is not set; skipping."
+            exit 0
+          fi
+          status=$(curl -sS -o body.json -w '%{http_code}' --max-time 60 \
+            -H "Authorization: Bearer $CRON_SECRET" "$SEND_URL" || echo 000)
+          echo "HTTP $status"; cat body.json || true; echo
+          if [ "$status" != "200" ]; then
+            echo "::warning::Reminder send returned HTTP $status"
+          fi

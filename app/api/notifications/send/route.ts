@@ -1,14 +1,22 @@
 import { NextResponse } from "next/server"
-import webpush from "web-push"
 import { db } from "@/lib/db"
 import { pushSubscriptions, taskReminders, checklists, deviceTokens } from "@/lib/db/schema"
-import { and, eq, inArray, like, lte } from "drizzle-orm"
+import { and, eq, inArray, isNull, lt, lte, or } from "drizzle-orm"
 import { isFcmConfigured, sendFcmToTokens, type FcmPayload } from "@/lib/fcm"
+import { getWebPush } from "@/lib/webpush"
+
+export const dynamic = "force-dynamic"
+export const maxDuration = 60
 
 /**
- * Deliver a notification to a set of native device tokens via FCM and prune any
- * tokens FCM reports as permanently invalid. Returns how many succeeded.
+ * Delivers daily "plan your day" nudges and due task reminders.
+ *
+ * Safe to call as often as you like (Vercel's daily cron plus the GitHub
+ * "Send reminders" workflow every 15 minutes): each subscription's daily
+ * nudge goes out once per UTC day, at the first run at or after its
+ * reminder_time (stored in UTC), and task reminders are marked sent.
  */
+
 async function sendToDeviceTokens(tokens: string[], payload: FcmPayload): Promise<number> {
   if (!isFcmConfigured() || tokens.length === 0) return 0
   const { successCount, invalidTokens } = await sendFcmToTokens(tokens, payload)
@@ -18,133 +26,148 @@ async function sendToDeviceTokens(tokens: string[], payload: FcmPayload): Promis
   return successCount
 }
 
-// Lazy VAPID configuration - only configure when actually sending
-let vapidConfigured = false
-function ensureVapidConfigured() {
-  if (!vapidConfigured && process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && process.env.VAPID_PRIVATE_KEY) {
-    webpush.setVapidDetails(
-      `mailto:${process.env.VAPID_EMAIL ?? "notifications@example.com"}`,
-      process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
-      process.env.VAPID_PRIVATE_KEY,
-    )
-    vapidConfigured = true
-  }
-}
-
 type SubRow = typeof pushSubscriptions.$inferSelect
 
 async function sendToSub(sub: SubRow, payload: string): Promise<boolean> {
-  const pushSubscription = {
-    endpoint: sub.endpoint,
-    keys: { p256dh: sub.p256dh, auth: sub.auth },
-  }
+  const webpush = getWebPush()
+  if (!webpush) return false
   try {
-    await webpush.sendNotification(pushSubscription, payload)
+    await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload)
     return true
   } catch (err: unknown) {
-    const webPushError = err as { statusCode?: number }
-    if (webPushError?.statusCode === 410 || webPushError?.statusCode === 404) {
+    const statusCode = (err as { statusCode?: number })?.statusCode
+    if (statusCode === 410 || statusCode === 404) {
       await db.delete(pushSubscriptions).where(eq(pushSubscriptions.id, sub.id))
     }
     return false
   }
 }
 
+function formatTaskDate(dateKey: string | undefined): string {
+  if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) return ""
+  // Parse as a calendar day (UTC) so it doesn't shift a day back in the US.
+  return new Date(`${dateKey}T00:00:00Z`).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  })
+}
+
 export async function GET(request: Request) {
-  // Verify cron secret to prevent unauthorized calls
   const authHeader = request.headers.get("authorization")
   const cronSecret = process.env.CRON_SECRET
   if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  if (!process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
-    return NextResponse.json({ error: "VAPID keys not configured" }, { status: 500 })
+  const webPushReady = getWebPush() !== null
+  const fcmReady = isFcmConfigured()
+
+  const now = new Date()
+  const todayUTC = now.toISOString().slice(0, 10)
+  const nowHHMM = now.toISOString().slice(11, 16)
+
+  const dailyPayload = {
+    title: "Don't Forget 🗓",
+    body: "Time to plan your day — open Don't Forget to see what's on your list.",
+    url: "/",
   }
 
-  ensureVapidConfigured()
+  // --- Daily nudges (web push) ---
+  let dailySent = 0
+  let dailyFailed = 0
+  if (webPushReady) {
+    const dueSubs = await db
+      .select()
+      .from(pushSubscriptions)
+      .where(
+        and(
+          eq(pushSubscriptions.enabled, true),
+          lte(pushSubscriptions.reminderTime, nowHHMM),
+          or(isNull(pushSubscriptions.lastSentOn), lt(pushSubscriptions.lastSentOn, todayUTC)),
+        ),
+      )
+    const payload = JSON.stringify(dailyPayload)
+    for (const sub of dueSubs) {
+      if (await sendToSub(sub, payload)) dailySent++
+      else dailyFailed++
+      // Mark as handled either way so a broken endpoint isn't retried all day.
+      await db.update(pushSubscriptions).set({ lastSentOn: todayUTC }).where(eq(pushSubscriptions.id, sub.id))
+    }
+  }
 
-  const nowUTC = new Date()
-  const currentHour = nowUTC.getUTCHours()
-  const formatUTCTime = (h: number, m = 0) => `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`
-  const currentTimeStr = formatUTCTime(currentHour, nowUTC.getUTCMinutes())
-  const targetHourPrefix = `${String(currentHour).padStart(2, "0")}:`
-
-  // --- Daily "plan your day" notifications ---
-  const subscriptions = await db
-    .select()
-    .from(pushSubscriptions)
-    .where(and(eq(pushSubscriptions.enabled, true), like(pushSubscriptions.reminderTime, `${targetHourPrefix}%`)))
-
-  const today = nowUTC.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })
-  const notificationPayload = JSON.stringify({
-    title: "Don't Forget 🗓",
-    body: `Good morning! Time to plan your day — ${today}`,
-    url: "/",
-  })
-
-  const results = await Promise.allSettled(subscriptions.map((sub) => sendToSub(sub, notificationPayload)))
-  const succeeded = results.filter((r) => r.status === "fulfilled" && r.value === true).length
-  const failed = results.length - succeeded
-
-  // --- Native (FCM) daily notifications for the same reminder hour ---
-  const dailyDevices = await db
-    .select({ token: deviceTokens.token })
-    .from(deviceTokens)
-    .where(and(eq(deviceTokens.enabled, true), like(deviceTokens.reminderTime, `${targetHourPrefix}%`)))
-
-  const nativeDailySucceeded = await sendToDeviceTokens(
-    dailyDevices.map((d) => d.token),
-    { title: "Don't Forget 🗓", body: `Good morning! Time to plan your day — ${today}`, url: "/" },
-  )
+  // --- Daily nudges (native FCM; native apps also schedule these locally) ---
+  if (fcmReady) {
+    const dueDevices = await db
+      .select({ id: deviceTokens.id, token: deviceTokens.token })
+      .from(deviceTokens)
+      .where(
+        and(
+          eq(deviceTokens.enabled, true),
+          lte(deviceTokens.reminderTime, nowHHMM),
+          or(isNull(deviceTokens.lastSentOn), lt(deviceTokens.lastSentOn, todayUTC)),
+        ),
+      )
+    if (dueDevices.length > 0) {
+      dailySent += await sendToDeviceTokens(dueDevices.map((d) => d.token), dailyPayload)
+      await db
+        .update(deviceTokens)
+        .set({ lastSentOn: todayUTC })
+        .where(inArray(deviceTokens.id, dueDevices.map((d) => d.id)))
+    }
+  }
 
   // --- Task reminders due now ---
+  let taskRemindersSent = 0
+  let taskRemindersFailed = 0
   const dueReminders = await db
     .select()
     .from(taskReminders)
-    .where(and(eq(taskReminders.sent, false), lte(taskReminders.reminderDatetime, nowUTC)))
-
-  let taskRemindersSent = 0
-  let taskRemindersFailed = 0
+    .where(and(eq(taskReminders.sent, false), lte(taskReminders.reminderDatetime, now)))
 
   for (const reminder of dueReminders) {
     const [cl] = await db
-      .select({ text: checklists.text, date: checklists.date })
+      .select({ text: checklists.text, date: checklists.date, completed: checklists.completed })
       .from(checklists)
       .where(eq(checklists.id, reminder.checklistId))
       .limit(1)
 
-    const userSubs = await db
-      .select()
-      .from(pushSubscriptions)
-      .where(and(eq(pushSubscriptions.userId, reminder.userId), eq(pushSubscriptions.enabled, true)))
+    // Nothing to remind about if the task is gone or already done.
+    if (!cl || cl.completed) {
+      await db.update(taskReminders).set({ sent: true }).where(eq(taskReminders.id, reminder.id))
+      continue
+    }
 
-    const userDevices = await db
-      .select({ token: deviceTokens.token })
-      .from(deviceTokens)
-      .where(and(eq(deviceTokens.userId, reminder.userId), eq(deviceTokens.enabled, true)))
+    const userSubs = webPushReady
+      ? await db
+          .select()
+          .from(pushSubscriptions)
+          .where(and(eq(pushSubscriptions.userId, reminder.userId), eq(pushSubscriptions.enabled, true)))
+      : []
+    const userDevices = fcmReady
+      ? await db
+          .select({ token: deviceTokens.token })
+          .from(deviceTokens)
+          .where(and(eq(deviceTokens.userId, reminder.userId), eq(deviceTokens.enabled, true)))
+      : []
 
-    if (userSubs.length === 0 && userDevices.length === 0) continue
+    if (userSubs.length === 0 && userDevices.length === 0) {
+      // No server channel for this user (e.g. they only use the Android app,
+      // which shows this reminder itself). Mark it so it isn't retried forever.
+      await db.update(taskReminders).set({ sent: true }).where(eq(taskReminders.id, reminder.id))
+      continue
+    }
 
-    const taskText = cl?.text ?? "Task"
-    const taskDate = cl?.date
-      ? new Date(cl.date).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
-      : ""
+    const taskDate = formatTaskDate(cl.date)
+    const body = `${cl.text}${taskDate ? ` — ${taskDate}` : ""}`
+    const url = `/?date=${encodeURIComponent(cl.date)}`
+    const payload = JSON.stringify({ title: "Task Reminder", body, url })
 
-    const taskBody = `${taskText}${taskDate ? ` — ${taskDate}` : ""}`
-    const taskPayload = JSON.stringify({ title: "Task Reminder", body: taskBody, url: "/" })
+    const webResults = await Promise.all(userSubs.map((sub) => sendToSub(sub, payload)))
+    const nativeSent = await sendToDeviceTokens(userDevices.map((d) => d.token), { title: "Task Reminder", body, url })
 
-    const taskResults = await Promise.allSettled(userSubs.map((sub) => sendToSub(sub, taskPayload)))
-    const anyWebSent = taskResults.some((r) => r.status === "fulfilled" && r.value === true)
-
-    const nativeSent = await sendToDeviceTokens(
-      userDevices.map((d) => d.token),
-      { title: "Task Reminder", body: taskBody, url: "/" },
-    )
-
-    const anySent = anyWebSent || nativeSent > 0
-
-    if (anySent) {
+    if (webResults.some(Boolean) || nativeSent > 0) {
       await db.update(taskReminders).set({ sent: true }).where(eq(taskReminders.id, reminder.id))
       taskRemindersSent++
     } else {
@@ -153,9 +176,9 @@ export async function GET(request: Request) {
   }
 
   return NextResponse.json({
-    message: `Sent ${succeeded} daily notifications, ${failed} failed. Task reminders: ${taskRemindersSent} sent, ${taskRemindersFailed} failed`,
-    time: currentTimeStr,
-    total: results.length,
+    message: `Daily: ${dailySent} sent, ${dailyFailed} failed. Task reminders: ${taskRemindersSent} sent, ${taskRemindersFailed} failed`,
+    time: nowHHMM,
+    channels: { webPush: webPushReady, fcm: fcmReady },
     taskReminders: { sent: taskRemindersSent, failed: taskRemindersFailed },
   })
 }

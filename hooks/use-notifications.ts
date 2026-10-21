@@ -2,134 +2,113 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { Capacitor } from "@capacitor/core"
-import { PushNotifications } from "@capacitor/push-notifications"
+import * as native from "@/lib/native-reminders"
 
 export type NotificationPermission = "default" | "granted" | "denied"
 
 export interface UseNotificationsResult {
   isSupported: boolean
+  /** Why notifications aren't available here, when isSupported is false. */
+  unsupportedReason: "browser" | "server" | null
   permission: NotificationPermission
   isSubscribed: boolean
   isLoading: boolean
+  /** Daily reminder time in the user's local time (HH:MM). */
   reminderTime: string
   /** True when running inside the native Android (Capacitor) shell. */
   isNative: boolean
+  /** Native only: false when Android blocks exact alarms, so reminders may be late. */
+  exactAlarms: boolean
+  fixExactAlarms: () => Promise<void>
   subscribe: (reminderTime?: string) => Promise<boolean>
   unsubscribe: () => Promise<boolean>
   updateReminderTime: (time: string) => Promise<boolean>
   sendTestNotification: () => Promise<boolean>
 }
 
-const NATIVE_TOKEN_KEY = "dontforget.native-push-token"
+const WEB_TIME_KEY = "dontforget.web-reminder-time"
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4)
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/")
   const rawData = atob(base64)
   const outputArray = new Uint8Array(rawData.length)
-  for (let i = 0; i < rawData.length; ++i) {
-    outputArray[i] = rawData.charCodeAt(i)
-  }
+  for (let i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i)
   return outputArray
 }
 
-/**
- * Run PushNotifications.register() and resolve with the FCM token from the
- * 'registration' event (or reject on error/timeout). Native only.
- */
-function registerForNativePush(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let settled = false
-    const cleanup = async () => {
-      try {
-        await PushNotifications.removeAllListeners()
-      } catch {
-        /* ignore */
-      }
-    }
+/** A real VAPID public key is an uncompressed P-256 point: 65 bytes, starting 0x04. */
+function validVapidKey(key: string | undefined): Uint8Array | null {
+  if (!key) return null
+  try {
+    const bytes = urlBase64ToUint8Array(key)
+    return bytes.length === 65 && bytes[0] === 4 ? bytes : null
+  } catch {
+    return null
+  }
+}
 
-    PushNotifications.addListener("registration", async (token) => {
-      if (settled) return
-      settled = true
-      await cleanup()
-      resolve(token.value)
-    })
-
-    PushNotifications.addListener("registrationError", async (err) => {
-      if (settled) return
-      settled = true
-      await cleanup()
-      reject(new Error(err.error ?? "registrationError"))
-    })
-
-    PushNotifications.register().catch(async (err) => {
-      if (settled) return
-      settled = true
-      await cleanup()
-      reject(err)
-    })
-
-    setTimeout(async () => {
-      if (settled) return
-      settled = true
-      await cleanup()
-      reject(new Error("Push registration timed out"))
-    }, 15000)
-  })
+/** Local "HH:MM" → UTC "HH:MM" (the server schedules web push in UTC). */
+function localToUtc(hhmm: string): string {
+  const [h, m] = hhmm.split(":").map(Number)
+  const d = new Date()
+  d.setHours(h, m, 0, 0)
+  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`
 }
 
 export function useNotifications(): UseNotificationsResult {
   const isNative = typeof window !== "undefined" && Capacitor.isNativePlatform()
 
   const [isSupported, setIsSupported] = useState(false)
+  const [unsupportedReason, setUnsupportedReason] = useState<"browser" | "server" | null>(null)
   const [permission, setPermission] = useState<NotificationPermission>("default")
   const [isSubscribed, setIsSubscribed] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [reminderTime, setReminderTime] = useState("08:00")
   const [currentEndpoint, setCurrentEndpoint] = useState<string | null>(null)
-  const [nativeToken, setNativeToken] = useState<string | null>(null)
+  const [exactAlarms, setExactAlarms] = useState(true)
 
-  // Check support and existing subscription on mount
   useEffect(() => {
     const check = async () => {
-      // --- Native (Capacitor/Android) ---
+      // --- Native: on-device local notifications ---
       if (isNative) {
         setIsSupported(true)
         try {
-          const perm = await PushNotifications.checkPermissions()
-          setPermission((perm.receive === "prompt" ? "default" : perm.receive) as NotificationPermission)
-          const savedToken = window.localStorage.getItem(NATIVE_TOKEN_KEY)
-          if (savedToken && perm.receive === "granted") {
-            setNativeToken(savedToken)
-            setIsSubscribed(true)
-          }
+          const prefs = native.getPrefs()
+          const perm = await native.checkPermission()
+          setPermission(perm === "prompt" ? "default" : perm)
+          setReminderTime(prefs.dailyTime ?? "08:00")
+          setIsSubscribed(prefs.enabled && perm === "granted")
+          setExactAlarms(await native.exactAlarmsAllowed())
         } catch (err) {
-          console.error("[v0] Native push check failed:", err)
+          console.error("Native notification check failed:", err)
         } finally {
           setIsLoading(false)
         }
         return
       }
 
-      // --- Web (service worker + PushManager) ---
-      const supported =
-        typeof window !== "undefined" &&
-        "serviceWorker" in navigator &&
-        "PushManager" in window &&
-        "Notification" in window
-
-      setIsSupported(supported)
-
-      if (!supported) {
+      // --- Web push ---
+      const browserOk = "serviceWorker" in navigator && "PushManager" in window && "Notification" in window
+      if (!browserOk) {
+        setUnsupportedReason("browser")
+        setIsLoading(false)
+        return
+      }
+      if (!validVapidKey(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY)) {
+        // Keys are missing or placeholders: hide the feature instead of failing.
+        setUnsupportedReason("server")
         setIsLoading(false)
         return
       }
 
+      setIsSupported(true)
       setPermission(Notification.permission as NotificationPermission)
+      setReminderTime(window.localStorage.getItem(WEB_TIME_KEY) ?? "08:00")
 
       try {
-        const registration = await navigator.serviceWorker.ready
-        const subscription = await registration.pushManager.getSubscription()
+        const registration = await navigator.serviceWorker.getRegistration("/")
+        const subscription = await registration?.pushManager.getSubscription()
         if (subscription) {
           setIsSubscribed(true)
           setCurrentEndpoint(subscription.endpoint)
@@ -141,101 +120,67 @@ export function useNotifications(): UseNotificationsResult {
       }
     }
 
-    check()
+    void check()
   }, [isNative])
 
-  // Register service worker (web only)
-  const registerServiceWorker = useCallback(async (): Promise<ServiceWorkerRegistration | null> => {
-    try {
-      const registration = await navigator.serviceWorker.register("/sw.js", {
-        scope: "/",
-      })
-      await navigator.serviceWorker.ready
-      return registration
-    } catch (err) {
-      console.error("Service worker registration failed:", err)
-      return null
-    }
-  }, [])
+  const fixExactAlarms = useCallback(async () => {
+    if (!isNative) return
+    await native.openExactAlarmSettings()
+    setExactAlarms(await native.exactAlarmsAllowed())
+    void native.syncReminders()
+  }, [isNative])
 
   const subscribe = useCallback(
     async (time = reminderTime): Promise<boolean> => {
-      // --- Native path ---
       if (isNative) {
         setIsLoading(true)
         try {
-          let perm = await PushNotifications.checkPermissions()
-          if (perm.receive === "prompt" || perm.receive === "prompt-with-rationale") {
-            perm = await PushNotifications.requestPermissions()
-          }
-          setPermission((perm.receive === "prompt" ? "default" : perm.receive) as NotificationPermission)
-          if (perm.receive !== "granted") return false
-
-          const token = await registerForNativePush()
-
-          const response = await fetch("/api/notifications/register-device", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token, platform: Capacitor.getPlatform(), reminderTime: time }),
-          })
-          if (!response.ok) {
-            console.error("[v0] Failed to register device token:", await response.json().catch(() => ({})))
-            return false
-          }
-
-          window.localStorage.setItem(NATIVE_TOKEN_KEY, token)
-          setNativeToken(token)
-          setIsSubscribed(true)
+          const perm = await native.requestPermission()
+          setPermission(perm === "prompt" ? "default" : perm)
+          if (perm !== "granted") return false
+          native.setPrefs({ enabled: true, dailyTime: time })
           setReminderTime(time)
+          setIsSubscribed(true)
+          const exact = await native.exactAlarmsAllowed()
+          setExactAlarms(exact)
+          await native.syncReminders()
           return true
         } catch (err) {
-          console.error("[v0] Native subscribe error:", err)
+          console.error("Enable reminders failed:", err)
           return false
         } finally {
           setIsLoading(false)
         }
       }
 
-      // --- Web path ---
       if (!isSupported) return false
+      const vapidKey = validVapidKey(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY)
+      if (!vapidKey) return false
 
       setIsLoading(true)
       try {
-        // Request notification permission
         const perm = await Notification.requestPermission()
         setPermission(perm as NotificationPermission)
+        if (perm !== "granted") return false
 
-        if (perm !== "granted") {
-          return false
-        }
-
-        const registration = await registerServiceWorker()
-        if (!registration) return false
-
-        const vapidPublicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY
-        if (!vapidPublicKey) {
-          console.error("VAPID public key not configured")
-          return false
-        }
-
+        await navigator.serviceWorker.register("/sw.js", { scope: "/" })
+        const registration = await navigator.serviceWorker.ready
         const subscription = await registration.pushManager.subscribe({
           userVisibleOnly: true,
-          applicationServerKey: urlBase64ToUint8Array(vapidPublicKey).buffer as ArrayBuffer,
+          applicationServerKey: vapidKey.buffer as ArrayBuffer,
         })
 
         const response = await fetch("/api/notifications/subscribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ subscription, reminderTime: time }),
+          body: JSON.stringify({ subscription, reminderTime: localToUtc(time) }),
         })
-
         if (!response.ok) {
-          const err = await response.json()
-          console.error("Failed to save subscription:", err)
           await subscription.unsubscribe()
           return false
         }
 
+        window.localStorage.setItem(WEB_TIME_KEY, time)
         setIsSubscribed(true)
         setCurrentEndpoint(subscription.endpoint)
         setReminderTime(time)
@@ -247,51 +192,30 @@ export function useNotifications(): UseNotificationsResult {
         setIsLoading(false)
       }
     },
-    [isNative, isSupported, reminderTime, registerServiceWorker]
+    [isNative, isSupported, reminderTime],
   )
 
   const unsubscribe = useCallback(async (): Promise<boolean> => {
-    // --- Native path ---
     if (isNative) {
-      setIsLoading(true)
-      try {
-        if (nativeToken) {
-          await fetch("/api/notifications/register-device", {
-            method: "DELETE",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token: nativeToken }),
-          })
-        }
-        window.localStorage.removeItem(NATIVE_TOKEN_KEY)
-        setNativeToken(null)
-        setIsSubscribed(false)
-        return true
-      } catch (err) {
-        console.error("[v0] Native unsubscribe error:", err)
-        return false
-      } finally {
-        setIsLoading(false)
-      }
+      native.setPrefs({ ...native.getPrefs(), enabled: false })
+      setIsSubscribed(false)
+      await native.cancelAll().catch(() => {})
+      return true
     }
 
-    // --- Web path ---
     if (!isSupported) return false
-
     setIsLoading(true)
     try {
-      const registration = await navigator.serviceWorker.ready
-      const subscription = await registration.pushManager.getSubscription()
-
+      const registration = await navigator.serviceWorker.getRegistration("/")
+      const subscription = await registration?.pushManager.getSubscription()
       if (subscription) {
         await subscription.unsubscribe()
-
         await fetch("/api/notifications/subscribe", {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ endpoint: subscription.endpoint }),
         })
       }
-
       setIsSubscribed(false)
       setCurrentEndpoint(null)
       return true
@@ -301,40 +225,26 @@ export function useNotifications(): UseNotificationsResult {
     } finally {
       setIsLoading(false)
     }
-  }, [isNative, isSupported, nativeToken])
+  }, [isNative, isSupported])
 
   const updateReminderTime = useCallback(
     async (time: string): Promise<boolean> => {
-      // --- Native path ---
       if (isNative) {
-        if (!nativeToken) return false
-        try {
-          const response = await fetch("/api/notifications/register-device", {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ token: nativeToken, reminderTime: time }),
-          })
-          if (!response.ok) return false
-          setReminderTime(time)
-          return true
-        } catch (err) {
-          console.error("[v0] Native update reminder time error:", err)
-          return false
-        }
+        native.setPrefs({ ...native.getPrefs(), dailyTime: time })
+        setReminderTime(time)
+        await native.syncReminders()
+        return true
       }
 
-      // --- Web path ---
       if (!currentEndpoint) return false
-
       try {
         const response = await fetch("/api/notifications/subscribe", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ endpoint: currentEndpoint, reminderTime: time }),
+          body: JSON.stringify({ endpoint: currentEndpoint, reminderTime: localToUtc(time) }),
         })
-
         if (!response.ok) return false
-
+        window.localStorage.setItem(WEB_TIME_KEY, time)
         setReminderTime(time)
         return true
       } catch (err) {
@@ -342,33 +252,35 @@ export function useNotifications(): UseNotificationsResult {
         return false
       }
     },
-    [isNative, nativeToken, currentEndpoint]
+    [isNative, currentEndpoint],
   )
 
   const sendTestNotification = useCallback(async (): Promise<boolean> => {
-    const bodyPayload = isNative ? { token: nativeToken } : { endpoint: currentEndpoint }
-    if (isNative ? !nativeToken : !currentEndpoint) return false
-
+    if (isNative) return native.sendLocalTest()
+    if (!currentEndpoint) return false
     try {
       const response = await fetch("/api/notifications/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(bodyPayload),
+        body: JSON.stringify({ endpoint: currentEndpoint }),
       })
       return response.ok
     } catch (err) {
       console.error("Test notification error:", err)
       return false
     }
-  }, [isNative, nativeToken, currentEndpoint])
+  }, [isNative, currentEndpoint])
 
   return {
     isSupported,
+    unsupportedReason,
     permission,
     isSubscribed,
     isLoading,
     reminderTime,
     isNative,
+    exactAlarms,
+    fixExactAlarms,
     subscribe,
     unsubscribe,
     updateReminderTime,

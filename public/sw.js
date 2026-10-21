@@ -32,22 +32,20 @@ self.addEventListener("notificationclick", (event) => {
 
   if (event.action === "dismiss") return
 
-  const targetUrl = event.notification.data?.url || "/"
+  const targetUrl = new URL(event.notification.data?.url || "/", self.location.origin).href
 
   event.waitUntil(
-    clients
-      .matchAll({ type: "window", includeUncontrolled: true })
-      .then((windowClients) => {
-        // If there's already an open window, focus it
-        for (const client of windowClients) {
-          if (client.url === targetUrl && "focus" in client) {
-            return client.focus()
-          }
+    clients.matchAll({ type: "window", includeUncontrolled: true }).then((windowClients) => {
+      // Reuse an open app window: navigate it to the target and focus it.
+      for (const client of windowClients) {
+        if (new URL(client.url).origin === self.location.origin && "focus" in client) {
+          const nav = client.url !== targetUrl && "navigate" in client ? client.navigate(targetUrl) : Promise.resolve(client)
+          return nav.then((c) => (c || client).focus())
         }
-        // Otherwise open a new window
-        if (clients.openWindow) {
-          return clients.openWindow(targetUrl)
-        }
-      })
+      }
+      if (clients.openWindow) {
+        return clients.openWindow(targetUrl)
+      }
+    })
   )
 })

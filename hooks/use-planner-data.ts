@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react"
 import { authClient } from "@/lib/auth-client"
 import { ChecklistItem, TaskReminder } from "@/components/day-checklist"
+import { notifyDataChanged } from "@/lib/native-reminders"
+import { flushQueue, pendingCount, sendOrQueue, QUEUE_FLUSHED_EVENT } from "@/lib/offline-queue"
 
 export interface Task {
   id: string
@@ -70,6 +72,44 @@ export function usePlannerData(weekStartDate: Date, category: string) {
   const [reminders, setReminders] = useState<Record<string, TaskReminder>>({})
 
   const weekKey = formatDateKey(weekStartDate)
+  // Bumped to refetch after reconnecting or returning to the app.
+  const [reloadToken, setReloadToken] = useState(0)
+
+  // Replay queued offline saves and refresh when the connection returns or
+  // the app comes back to the foreground.
+  useEffect(() => {
+    if (!user) return
+    const resync = async () => {
+      if (!navigator.onLine) {
+        setStatus("offline")
+        return
+      }
+      const hadPending = pendingCount() > 0
+      const left = await flushQueue()
+      if (left === 0) {
+        if (hadPending) notifyDataChanged()
+        setReloadToken((t) => t + 1)
+      }
+    }
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void resync()
+    }
+    const onOffline = () => setStatus("offline")
+    const onFlushed = (e: Event) => {
+      if ((e as CustomEvent<{ left: number }>).detail?.left === 0) setStatus("saved")
+    }
+    window.addEventListener("online", resync)
+    window.addEventListener("offline", onOffline)
+    window.addEventListener(QUEUE_FLUSHED_EVENT, onFlushed)
+    document.addEventListener("visibilitychange", onVisible)
+    if (pendingCount() > 0) void resync()
+    return () => {
+      window.removeEventListener("online", resync)
+      window.removeEventListener("offline", onOffline)
+      window.removeEventListener(QUEUE_FLUSHED_EVENT, onFlushed)
+      document.removeEventListener("visibilitychange", onVisible)
+    }
+  }, [user])
 
   // Load data when week/category/auth changes
   useEffect(() => {
@@ -104,15 +144,41 @@ export function usePlannerData(weekStartDate: Date, category: string) {
       return
     }
 
+    const cacheKey = `dontforget.cache-${user.id}-${weekKey}-${category}`
+    let cancelled = false
+
     const loadData = async () => {
-      setIsLoading(true)
+      // Only show the full-screen loader on first load, not on background refreshes.
+      if (reloadToken === 0) setIsLoading(true)
       try {
-        const res = await fetch(
-          `/api/planner?weekStart=${weekKey}&category=${encodeURIComponent(category)}`,
-        )
-        if (!res.ok) throw new Error("Failed to load planner data")
-        const { notes, events: eventsData, checklists: checklistsData, reminders: remindersData } =
-          await res.json()
+        let payload: {
+          notes: { date: string; content: string }[]
+          events: PlannerEvent[]
+          checklists: ChecklistRow[]
+          reminders: TaskReminder[]
+        }
+        let fromCache = false
+        try {
+          const res = await fetch(
+            `/api/planner?weekStart=${weekKey}&category=${encodeURIComponent(category)}`,
+            { cache: "no-store" },
+          )
+          if (!res.ok) throw new Error("Failed to load planner data")
+          payload = await res.json()
+          try {
+            localStorage.setItem(cacheKey, JSON.stringify(payload))
+          } catch {
+            /* storage full */
+          }
+        } catch (err) {
+          // Offline: show the last copy of this week we saw.
+          const cached = localStorage.getItem(cacheKey)
+          if (!cached) throw err
+          payload = JSON.parse(cached)
+          fromCache = true
+        }
+        if (cancelled) return
+        const { notes, events: eventsData, checklists: checklistsData, reminders: remindersData } = payload
 
         const categoryGoalsKey = `goals-${weekKey}-${category}`
         const data: Record<string, string> = {}
@@ -147,17 +213,21 @@ export function usePlannerData(weekStartDate: Date, category: string) {
         setReminders(remindersMap)
 
         setWeekData(data)
-        setStatus("saved")
+        setStatus(fromCache || pendingCount() > 0 ? "offline" : "saved")
       } catch (error) {
         console.error("Error loading data:", error)
-        setStatus("offline")
+        if (!cancelled) setStatus("offline")
       } finally {
-        setIsLoading(false)
+        if (!cancelled) setIsLoading(false)
       }
     }
 
     loadData()
-  }, [user, weekKey, category, sessionPending])
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, weekKey, category, sessionPending, reloadToken])
 
   // Save day content (stored as notes)
   const saveTask = useCallback(
@@ -182,14 +252,16 @@ export function usePlannerData(weekStartDate: Date, category: string) {
       try {
         const dateKey = formatDateKey(date)
         const categoryDateKey = `${dateKey}-${category}`
-        const res = await fetch("/api/notes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key: categoryDateKey, content }),
-        })
-        if (!res.ok) throw new Error("Failed to save note")
-
         setWeekData((prev) => ({ ...prev, [dateKey]: content }))
+        const res = await sendOrQueue(`note:${categoryDateKey}`, "/api/notes", "POST", {
+          key: categoryDateKey,
+          content,
+        })
+        if (!res) {
+          setStatus("offline")
+          return
+        }
+        if (!res.ok) throw new Error("Failed to save note")
         setStatus("saved")
       } catch (error) {
         console.error("Error saving day content:", error)
@@ -221,14 +293,16 @@ export function usePlannerData(weekStartDate: Date, category: string) {
 
       try {
         const categoryGoalsKey = `goals-${weekKey}-${category}`
-        const res = await fetch("/api/notes", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ key: categoryGoalsKey, content }),
-        })
-        if (!res.ok) throw new Error("Failed to save goals")
-
         setWeekData((prev) => ({ ...prev, goals: content }))
+        const res = await sendOrQueue(`note:${categoryGoalsKey}`, "/api/notes", "POST", {
+          key: categoryGoalsKey,
+          content,
+        })
+        if (!res) {
+          setStatus("offline")
+          return
+        }
+        if (!res.ok) throw new Error("Failed to save goals")
         setStatus("saved")
       } catch (error) {
         console.error("Error saving goals:", error)
@@ -261,6 +335,7 @@ export function usePlannerData(weekStartDate: Date, category: string) {
       setWeekData({})
       setChecklists({})
       setStatus("saved")
+      notifyDataChanged()
     } catch (error) {
       console.error("Error clearing week:", error)
       setStatus("offline")
@@ -290,13 +365,18 @@ export function usePlannerData(weekStartDate: Date, category: string) {
       }
 
       try {
-        const res = await fetch("/api/checklists", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ date, category, items }),
+        const res = await sendOrQueue(`checklist:${category}:${date}`, "/api/checklists", "POST", {
+          date,
+          category,
+          items,
         })
+        if (!res) {
+          setStatus("offline")
+          return
+        }
         if (!res.ok) throw new Error("Failed to save checklist")
         setStatus("saved")
+        notifyDataChanged()
       } catch (error) {
         console.error("Error saving checklist:", error)
         setStatus("offline")
@@ -317,6 +397,7 @@ export function usePlannerData(weekStartDate: Date, category: string) {
           body: JSON.stringify({ id: checklistId, due_time: dueTime }),
         })
         if (!res.ok) throw new Error("Failed to save due time")
+        notifyDataChanged()
 
         setChecklists((prev) => {
           const updated = { ...prev }
@@ -349,6 +430,7 @@ export function usePlannerData(weekStartDate: Date, category: string) {
         if (response.ok) {
           const { reminder } = await response.json()
           setReminders((prev) => ({ ...prev, [checklistId]: reminder }))
+          notifyDataChanged()
         }
       } catch (error) {
         console.error("Error saving reminder:", error)
@@ -375,6 +457,7 @@ export function usePlannerData(weekStartDate: Date, category: string) {
             delete updated[checklistId]
             return updated
           })
+          notifyDataChanged()
         }
       } catch (error) {
         console.error("Error removing reminder:", error)
@@ -386,6 +469,7 @@ export function usePlannerData(weekStartDate: Date, category: string) {
   // Sign out
   const signOut = useCallback(async () => {
     await authClient.signOut()
+    notifyDataChanged() // clears this account's reminders on the phone
     setWeekData({})
     setChecklists({})
     setReminders({})
