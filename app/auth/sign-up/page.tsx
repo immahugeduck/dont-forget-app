@@ -36,12 +36,16 @@ export default function Page() {
     }
 
     try {
-      const { error } = await authClient.signUp.email({
+      const { error, needsConfirmation } = await authClient.signUp.email({
         email,
         password,
         name: email.split('@')[0],
       })
       if (error) throw new Error(error.message || 'Could not create account')
+      if (needsConfirmation) {
+        router.push('/auth/sign-up-success')
+        return
+      }
       router.push('/')
       router.refresh()
     } catch (error: unknown) {
