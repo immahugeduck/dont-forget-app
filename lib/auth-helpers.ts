@@ -1,12 +1,13 @@
-import { auth } from "@/lib/auth"
-import { headers } from "next/headers"
+import { createClient } from "@/lib/supabase/server"
 
 /**
- * Returns the current session user id, or null when unauthenticated.
- * There is no RLS on Neon, so every query that touches user data MUST
- * scope by this id.
+ * Returns the signed-in Supabase user's id, or null when unauthenticated.
+ * API routes query Postgres directly (bypassing RLS), so every query that
+ * touches user data MUST scope by this id.
  */
 export async function getUserId(): Promise<string | null> {
-  const session = await auth.api.getSession({ headers: await headers() })
-  return session?.user?.id ?? null
+  const supabase = await createClient()
+  const { data, error } = await supabase.auth.getUser()
+  if (error) return null
+  return data.user?.id ?? null
 }
