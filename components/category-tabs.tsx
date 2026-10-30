@@ -218,39 +218,42 @@ export function CategoryTabs({
         }
 
         return (
-          <button
-            key={cat.id}
-            onClick={() => onSelect(cat.id)}
-            onDoubleClick={() => isEditable && startEditing(cat)}
-            className={cn(
-              "group relative flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap min-w-fit",
-              isEditable && "pr-8"
-            )}
-            style={{
-              backgroundColor: isActive ? cat.color : "transparent",
-              color: isActive ? "#09090b" : "var(--muted-foreground)",
-            }}
-          >
-            {iconMap[cat.icon] || iconMap.folder}
-            {cat.name}
-            {isActive && (
-              <span
-                className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full"
-                style={{ backgroundColor: cat.color }}
-              />
-            )}
+          <div key={cat.id} className="group relative flex min-w-fit">
+            <button
+              type="button"
+              onClick={() => onSelect(cat.id)}
+              onDoubleClick={() => isEditable && startEditing(cat)}
+              aria-pressed={isActive}
+              className={cn(
+                "relative flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all whitespace-nowrap min-w-fit",
+                isEditable && "pr-8"
+              )}
+              style={{
+                backgroundColor: isActive ? cat.color : "transparent",
+                color: isActive ? "#09090b" : "var(--muted-foreground)",
+              }}
+            >
+              {iconMap[cat.icon] || iconMap.folder}
+              {cat.name}
+              {isActive && (
+                <span
+                  className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full"
+                  style={{ backgroundColor: cat.color }}
+                />
+              )}
+            </button>
             {isEditable && isActive && (
               <button
-                onClick={(e) => {
-                  e.stopPropagation()
-                  startEditing(cat)
-                }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 opacity-60 hover:opacity-100"
+                type="button"
+                onClick={() => startEditing(cat)}
+                aria-label={`Edit ${cat.name} category`}
+                className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center justify-center w-6 h-6 opacity-60 hover:opacity-100"
+                style={{ color: "#09090b" }}
               >
                 <Pencil className="w-3 h-3" />
               </button>
             )}
-          </button>
+          </div>
         )
       })}
 
