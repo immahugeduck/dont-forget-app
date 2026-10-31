@@ -6,7 +6,7 @@ import { WeekNavigator } from "@/components/week-navigator"
 import { CategoryTabs } from "@/components/category-tabs"
 import { DayCard } from "@/components/day-card"
 import { TagFilter } from "@/components/tag-filter"
-import { MonthCalendar } from "@/components/month-calendar"
+import { JumpToDateDialog } from "@/components/jump-to-date-dialog"
 import { StatsPanel } from "@/components/stats-panel"
 import { QuickActions } from "@/components/quick-actions"
 import { StatusIndicator } from "@/components/status-indicator"
@@ -41,7 +41,10 @@ const ALL_SLOTS = [...DAYS_OF_WEEK, GOAL_SLOT]
 
 // Calendar boundaries
 const MIN_DATE = new Date(2020, 0, 1) // January 1, 2020
-const MAX_DATE = new Date(2030, 11, 31) // December 31, 2030
+const MAX_DATE = new Date(2040, 11, 31) // December 31, 2040
+// Kept narrower than the planner range: the weather hook builds an entry for every day in it.
+const WEATHER_START_DATE = new Date(2020, 0, 1)
+const WEATHER_END_DATE = new Date(2030, 11, 31)
 
 function getWeekNumber(date: Date): number {
   const temp = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
@@ -94,8 +97,7 @@ export function PlannerPage() {
   const [currentWeekStart, setCurrentWeekStart] = useState(() => getWeekStartDate(new Date()))
   const [categoryId, setCategoryId] = useState<string | null>(null)
   const [activeTag, setActiveTag] = useState<string | null>(null)
-  const [showCalendar, setShowCalendar] = useState(false)
-  const [calendarViewDate, setCalendarViewDate] = useState(new Date(currentWeekStart))
+  const [showJumpToDate, setShowJumpToDate] = useState(false)
   const [showStats, setShowStats] = useState(false)
   const [showWeather, setShowWeather] = useState(false)
   const [showNotifications, setShowNotifications] = useState(false)
@@ -130,7 +132,7 @@ export function PlannerPage() {
       if (isNaN(date.getTime()) || date < MIN_DATE || date > MAX_DATE) return
       setCurrentWeekStart(getWeekStartDate(date))
       setFocusedDate(date)
-      setShowCalendar(false)
+      setShowJumpToDate(false)
       setShowStats(false)
       setShowWeather(false)
       setShowNotifications(false)
@@ -181,8 +183,8 @@ export function PlannerPage() {
     clearLocation,
     refresh: refreshWeather,
   } = useWeather({
-    startDate: MIN_DATE,
-    endDate: MAX_DATE,
+    startDate: WEATHER_START_DATE,
+    endDate: WEATHER_END_DATE,
   })
 
   const { isSubscribed: notificationsEnabled } = useNotifications()
@@ -243,14 +245,27 @@ export function PlannerPage() {
     setCurrentWeekStart(getWeekStartDate(new Date()))
   }, [])
 
-  const handleSelectDate = useCallback((date: Date) => {
+  const handleJumpToDate = useCallback((date: Date) => {
     setCurrentWeekStart(getWeekStartDate(date))
-    setShowCalendar(false)
+    setShowJumpToDate(false)
+    // Wait for the dialog to close and the new week to render before scrolling.
+    setTimeout(() => {
+      const dayIndex = date.getDay()
+      const dayId = DAYS_OF_WEEK[dayIndex === 0 ? 6 : dayIndex - 1].id
+      document.getElementById(`day-${dayId}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
+    }, 250)
+  }, [])
+
+  const handleOpenJumpToDate = useCallback(() => {
+    setShowJumpToDate(true)
+    setShowStats(false)
+    setShowWeather(false)
+    setShowNotifications(false)
   }, [])
 
   const handleOpenFocusedDay = useCallback(() => {
     setFocusedDate(new Date())
-    setShowCalendar(false)
+    setShowJumpToDate(false)
     setShowStats(false)
     setShowWeather(false)
     setShowNotifications(false)
@@ -388,7 +403,6 @@ export function PlannerPage() {
                   if (showNotifications) return
                   setShowWeather(false)
                   setShowStats(false)
-                  setShowCalendar(false)
                 }}
                 className={showNotifications ? "bg-secondary" : ""}
                 title="Notifications"
@@ -403,7 +417,6 @@ export function PlannerPage() {
                   setShowWeather(!showWeather)
                   if (showWeather) return
                   setShowStats(false)
-                  setShowCalendar(false)
                   setShowNotifications(false)
                 }}
                 className={showWeather ? "bg-secondary" : ""}
@@ -419,7 +432,6 @@ export function PlannerPage() {
                   setShowStats(!showStats)
                   if (showStats) return
                   setShowWeather(false)
-                  setShowCalendar(false)
                   setShowNotifications(false)
                 }}
                 className={showStats ? "bg-secondary" : ""}
@@ -431,19 +443,10 @@ export function PlannerPage() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => {
-                  setShowCalendar(!showCalendar)
-                  if (!showCalendar) {
-                    setCalendarViewDate(new Date(currentWeekStart))
-                  } else {
-                    return
-                  }
-                  setShowStats(false)
-                  setShowWeather(false)
-                  setShowNotifications(false)
-                }}
-                className={showCalendar ? "bg-secondary" : ""}
-                title="Calendar"
+                onClick={handleOpenJumpToDate}
+                className={showJumpToDate ? "bg-secondary" : ""}
+                title="Jump to date"
+                aria-label="Jump to date"
               >
                 <Calendar className="w-5 h-5" />
               </Button>
@@ -473,17 +476,6 @@ export function PlannerPage() {
       </header>
 
       <main className="max-w-lg mx-auto px-4 pt-4">
-        {/* Month Calendar */}
-        {showCalendar && (
-          <MonthCalendar
-            currentDate={calendarViewDate}
-            selectedDate={currentWeekStart}
-            onSelectDate={handleSelectDate}
-            onMonthChange={setCalendarViewDate}
-            onClose={() => setShowCalendar(false)}
-          />
-        )}
-
         {/* Weather Tab */}
         {showWeather && (
           <div className="mb-4 p-4 bg-card rounded-2xl border border-border">
@@ -584,6 +576,7 @@ export function PlannerPage() {
 
       {/* Quick Actions FAB */}
       <QuickActions
+        onJumpToDate={handleOpenJumpToDate}
         onJumpToToday={() => {
           handleGoToToday()
           setTimeout(() => {
@@ -598,6 +591,16 @@ export function PlannerPage() {
             clearWeek()
           }
         }}
+      />
+
+      <JumpToDateDialog
+        open={showJumpToDate}
+        onOpenChange={setShowJumpToDate}
+        selectedWeekStart={currentWeekStart}
+        today={today}
+        minDate={MIN_DATE}
+        maxDate={MAX_DATE}
+        onSelectDate={handleJumpToDate}
       />
 
       {/* Focused Day View */}
