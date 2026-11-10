@@ -60,6 +60,61 @@ function formatDateKey(date: Date): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`
 }
 
+function parseStored(raw: string | null): unknown {
+  if (!raw) return null
+  try {
+    return JSON.parse(raw)
+  } catch {
+    return null
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+// Data saved on the device by older versions of the app (or half-written
+// saves) can be in a different shape. Keep only what the planner can render
+// so one bad entry can't crash the whole page on every load.
+function readDayNotes(raw: string | null): Record<string, string> {
+  const parsed = parseStored(raw)
+  if (!isRecord(parsed)) return {}
+  const out: Record<string, string> = {}
+  for (const [key, value] of Object.entries(parsed)) {
+    if (typeof value === "string") out[key] = value
+  }
+  return out
+}
+
+function readChecklists(raw: string | null): Record<string, ChecklistItem[]> {
+  const parsed = parseStored(raw)
+  if (!isRecord(parsed)) return {}
+  const out: Record<string, ChecklistItem[]> = {}
+  for (const [key, items] of Object.entries(parsed)) {
+    if (!Array.isArray(items)) continue
+    out[key] = items
+      .filter((item): item is Record<string, unknown> => isRecord(item) && typeof item.id === "string")
+      .map((item, i) => ({
+        id: item.id as string,
+        text: typeof item.text === "string" ? item.text : "",
+        completed: item.completed === true,
+        order: typeof item.order === "number" ? item.order : i,
+        due_time: typeof item.due_time === "string" ? item.due_time : null,
+      }))
+  }
+  return out
+}
+
+function isPlannerPayload(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    Array.isArray(value.notes) &&
+    Array.isArray(value.events) &&
+    Array.isArray(value.checklists) &&
+    Array.isArray(value.reminders)
+  )
+}
+
 export function usePlannerData(weekStartDate: Date, category: string) {
   const { data: sessionData, isPending: sessionPending } = authClient.useSession()
   const user = sessionData?.user ?? null
@@ -117,29 +172,8 @@ export function usePlannerData(weekStartDate: Date, category: string) {
 
     if (!user) {
       // Non-authenticated users: use localStorage
-      const storageKey = `last-one-week-${weekKey}-${category}`
-      const stored = localStorage.getItem(storageKey)
-      if (stored) {
-        try {
-          setWeekData(JSON.parse(stored))
-        } catch {
-          setWeekData({})
-        }
-      } else {
-        setWeekData({})
-      }
-
-      const checklistKey = `last-one-checklists-${weekKey}-${category}`
-      const storedChecklists = localStorage.getItem(checklistKey)
-      if (storedChecklists) {
-        try {
-          setChecklists(JSON.parse(storedChecklists))
-        } catch {
-          setChecklists({})
-        }
-      } else {
-        setChecklists({})
-      }
+      setWeekData(readDayNotes(localStorage.getItem(`last-one-week-${weekKey}-${category}`)))
+      setChecklists(readChecklists(localStorage.getItem(`last-one-checklists-${weekKey}-${category}`)))
       setIsLoading(false)
       return
     }
@@ -172,9 +206,9 @@ export function usePlannerData(weekStartDate: Date, category: string) {
           }
         } catch (err) {
           // Offline: show the last copy of this week we saw.
-          const cached = localStorage.getItem(cacheKey)
-          if (!cached) throw err
-          payload = JSON.parse(cached)
+          const cached = parseStored(localStorage.getItem(cacheKey))
+          if (!isPlannerPayload(cached)) throw err
+          payload = cached as typeof payload
           fromCache = true
         }
         if (cancelled) return

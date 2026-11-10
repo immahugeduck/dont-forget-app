@@ -56,7 +56,7 @@ export function useWeather({ startDate, endDate }: UseWeatherOptions) {
       }
 
       // Update weather data with real forecasts
-      const newWeatherData: Record<string, WeatherData> = { ...weatherData }
+      const newWeatherData: Record<string, WeatherData> = {}
 
       for (const forecast of data.forecasts) {
         newWeatherData[forecast.date] = {
@@ -70,8 +70,8 @@ export function useWeather({ startDate, endDate }: UseWeatherOptions) {
         }
       }
 
-      setWeatherData(newWeatherData)
-      
+      setWeatherData((prev) => ({ ...prev, ...newWeatherData }))
+
       // Save location
       const newLocation = { lat, lon, name: data.location }
       setLocation(newLocation)
@@ -84,7 +84,7 @@ export function useWeather({ startDate, endDate }: UseWeatherOptions) {
     } finally {
       setIsLoading(false)
     }
-  }, [weatherData])
+  }, [])
 
   // Request user's location and fetch weather
   const requestLocation = useCallback(() => {
@@ -127,17 +127,12 @@ export function useWeather({ startDate, endDate }: UseWeatherOptions) {
 
   // Load saved location from localStorage or auto-request on mount
   useEffect(() => {
-    const saved = localStorage.getItem("last-one-weather-location")
+    const saved = readSavedLocation()
     if (saved) {
-      try {
-        const parsed = JSON.parse(saved)
-        setLocation(parsed)
-        setUseRealWeather(true)
-        // Fetch fresh weather data for the saved location
-        fetchWeather(parsed.lat, parsed.lon)
-      } catch {
-        // Ignore parse errors, will auto-request below
-      }
+      setLocation(saved)
+      setUseRealWeather(true)
+      // Fetch fresh weather data for the saved location
+      fetchWeather(saved.lat, saved.lon)
     } else if (!hasRequestedLocation.current) {
       // Auto-request location on first load if no saved location
       hasRequestedLocation.current = true
@@ -187,6 +182,23 @@ export function useWeather({ startDate, endDate }: UseWeatherOptions) {
     clearLocation,
     refresh,
   }
+}
+
+// Ignore (and forget) a saved location that isn't a usable lat/lon pair.
+function readSavedLocation(): StoredLocation | null {
+  const key = "last-one-weather-location"
+  try {
+    const raw = localStorage.getItem(key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (Number.isFinite(parsed?.lat) && Number.isFinite(parsed?.lon)) {
+      return { lat: parsed.lat, lon: parsed.lon, name: typeof parsed.name === "string" ? parsed.name : "" }
+    }
+    localStorage.removeItem(key)
+  } catch {
+    /* unreadable: fall through */
+  }
+  return null
 }
 
 function formatDateKey(date: Date): string {

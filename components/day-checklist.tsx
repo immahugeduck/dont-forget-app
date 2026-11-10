@@ -25,6 +25,12 @@ import { CSS } from "@dnd-kit/utilities"
 import { UserTag, extractTags, stripTags } from "@/hooks/use-tags"
 import { TagPill } from "./tag-search"
 
+// datetime-local inputs expect local wall-clock time; toISOString() alone would show UTC.
+function toLocalInputValue(d: Date): string {
+  if (Number.isNaN(d.getTime())) return ""
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16)
+}
+
 export interface ChecklistItem {
   id: string
   text: string
@@ -349,10 +355,10 @@ function SortableTaskItem({
                 <input
                   type="datetime-local"
                   defaultValue={hasReminder 
-                    ? new Date(reminder!.reminder_datetime).toISOString().slice(0, 16)
+                    ? toLocalInputValue(new Date(reminder!.reminder_datetime)) || getDefaultReminderDatetime()
                     : getDefaultReminderDatetime()
                   }
-                  min={new Date().toISOString().slice(0, 16)}
+                  min={toLocalInputValue(new Date())}
                   className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background"
                   id={`reminder-input-${item.id}`}
                 />
@@ -447,18 +453,18 @@ export function DayChecklist({
   // Get default datetime for new reminder (defaults to task date at 9am, or tomorrow if date is in past)
   const getDefaultReminderDatetime = () => {
     const now = new Date()
-    const defaultDate = date ? new Date(date) : new Date()
-    
-    // If date is in past or today before current time, use tomorrow
-    if (defaultDate < now) {
-      defaultDate.setDate(now.getDate() + 1)
-    }
-    
-    // Set to 9am
+    const parsed = date ? new Date(date) : new Date()
+    const defaultDate = Number.isNaN(parsed.getTime()) ? new Date() : parsed
     defaultDate.setHours(9, 0, 0, 0)
-    
-    // Format for datetime-local input
-    return defaultDate.toISOString().slice(0, 16)
+
+    if (defaultDate <= now) {
+      const tomorrow = new Date(now)
+      tomorrow.setDate(now.getDate() + 1)
+      tomorrow.setHours(9, 0, 0, 0)
+      return toLocalInputValue(tomorrow)
+    }
+
+    return toLocalInputValue(defaultDate)
   }
 
   const handleSetReminder = (checklistId: string, datetime: string) => {
@@ -481,6 +487,7 @@ export function DayChecklist({
 
   const formatReminderTime = (datetime: string) => {
     const d = new Date(datetime)
+    if (Number.isNaN(d.getTime())) return "Reminder set"
     const now = new Date()
     const isToday = d.toDateString() === now.toDateString()
     const isTomorrow = d.toDateString() === new Date(now.getTime() + 86400000).toDateString()

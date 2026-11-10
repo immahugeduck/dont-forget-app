@@ -1,22 +1,36 @@
 "use client"
 
 import { useState } from "react"
-import { Plus, Navigation, Trash2, X } from "lucide-react"
+import { Plus, Navigation, Trash2, X, CalendarSearch } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
 interface QuickActionsProps {
+  onJumpToDate: () => void
   onJumpToToday: () => void
   onClearWeek: () => void
 }
 
-export function QuickActions({ onJumpToToday, onClearWeek }: QuickActionsProps) {
+export function QuickActions({ onJumpToDate, onJumpToToday, onClearWeek }: QuickActionsProps) {
   const [isOpen, setIsOpen] = useState(false)
 
   return (
     <div className="fixed bottom-6 right-6 flex flex-col-reverse items-end gap-3 z-50">
       {/* Action buttons */}
       {isOpen && (
-        <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+        <div className="flex flex-col items-end gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <Button
+            onClick={() => {
+              onJumpToDate()
+              setIsOpen(false)
+            }}
+            size="sm"
+            variant="secondary"
+            className="rounded-full shadow-lg h-12 px-4 gap-2"
+          >
+            <CalendarSearch className="w-4 h-4" />
+            Jump to Date
+          </Button>
+
           <Button
             onClick={() => {
               onJumpToToday()
