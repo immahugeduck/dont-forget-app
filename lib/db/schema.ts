@@ -82,9 +82,12 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   endpoint: text("endpoint").notNull(),
   p256dh: text("p256dh").notNull(),
   auth: text("auth").notNull(),
+  // "HH:MM" in `timezone`; in UTC when `timezone` is null (older rows).
   reminderTime: text("reminder_time").notNull().default("08:00"),
+  // IANA zone of the device, e.g. "America/Indiana/Indianapolis".
+  timezone: text("timezone"),
   enabled: boolean("enabled").notNull().default(true),
-  // UTC day (YYYY-MM-DD) the daily reminder was last delivered.
+  // Day (YYYY-MM-DD, in `timezone`, else UTC) the daily reminder was last delivered.
   lastSentOn: date("last_sent_on", { mode: "string" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),

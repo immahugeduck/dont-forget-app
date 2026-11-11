@@ -48,13 +48,17 @@ function validVapidKey(key: string | undefined): Uint8Array | null {
   }
 }
 
-/** Local "HH:MM" → UTC "HH:MM" (the server schedules web push in UTC). */
-function localToUtc(hhmm: string): string {
-  const [h, m] = hhmm.split(":").map(Number)
-  const d = new Date()
-  d.setHours(h, m, 0, 0)
-  return `${String(d.getUTCHours()).padStart(2, "0")}:${String(d.getUTCMinutes()).padStart(2, "0")}`
+/** The device's IANA time zone, e.g. "America/Indiana/Indianapolis". */
+function deviceTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
+  } catch {
+    return undefined
+  }
 }
+
+// The time zone the server last saved for this device's subscription.
+const WEB_TZ_KEY = "dontforget.push-timezone"
 
 export function useNotifications(): UseNotificationsResult {
   const isNative = typeof window !== "undefined" && Capacitor.isNativePlatform()
@@ -112,6 +116,21 @@ export function useNotifications(): UseNotificationsResult {
         if (subscription) {
           setIsSubscribed(true)
           setCurrentEndpoint(subscription.endpoint)
+          // Older subscriptions were saved in UTC, and devices change time
+          // zones: re-save the local time with this device's zone when needed.
+          const tz = deviceTimeZone()
+          if (tz && window.localStorage.getItem(WEB_TZ_KEY) !== tz) {
+            const res = await fetch("/api/notifications/subscribe", {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                endpoint: subscription.endpoint,
+                reminderTime: window.localStorage.getItem(WEB_TIME_KEY) ?? "08:00",
+                timezone: tz,
+              }),
+            }).catch(() => null)
+            if (res?.ok) window.localStorage.setItem(WEB_TZ_KEY, tz)
+          }
         }
       } catch (err) {
         console.error("Error checking push subscription:", err)
@@ -173,7 +192,7 @@ export function useNotifications(): UseNotificationsResult {
         const response = await fetch("/api/notifications/subscribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ subscription, reminderTime: localToUtc(time) }),
+          body: JSON.stringify({ subscription, reminderTime: time, timezone: deviceTimeZone() }),
         })
         if (!response.ok) {
           await subscription.unsubscribe()
@@ -181,6 +200,7 @@ export function useNotifications(): UseNotificationsResult {
         }
 
         window.localStorage.setItem(WEB_TIME_KEY, time)
+        window.localStorage.setItem(WEB_TZ_KEY, deviceTimeZone() ?? "")
         setIsSubscribed(true)
         setCurrentEndpoint(subscription.endpoint)
         setReminderTime(time)
@@ -241,10 +261,11 @@ export function useNotifications(): UseNotificationsResult {
         const response = await fetch("/api/notifications/subscribe", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ endpoint: currentEndpoint, reminderTime: localToUtc(time) }),
+          body: JSON.stringify({ endpoint: currentEndpoint, reminderTime: time, timezone: deviceTimeZone() }),
         })
         if (!response.ok) return false
         window.localStorage.setItem(WEB_TIME_KEY, time)
+        window.localStorage.setItem(WEB_TZ_KEY, deviceTimeZone() ?? "")
         setReminderTime(time)
         return true
       } catch (err) {
