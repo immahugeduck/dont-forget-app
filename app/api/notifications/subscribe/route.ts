@@ -2,7 +2,8 @@ import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { pushSubscriptions } from "@/lib/db/schema"
 import { getUserId } from "@/lib/auth-helpers"
-import { and, eq } from "drizzle-orm"
+import { and, eq, ne } from "drizzle-orm"
+import { isValidTimeZone } from "@/lib/reminder-clock"
 
 /** Shape of the serialized PushSubscription received from the client */
 interface SerializedPushSubscription {
@@ -14,7 +15,8 @@ interface SerializedPushSubscription {
 }
 
 
-// Zero-padded 24h "HH:MM" (UTC); the cron compares these as strings.
+// Zero-padded 24h "HH:MM", local to `timezone` when one is sent (else UTC,
+// from older clients). The send job compares these as strings.
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/
 
 export async function POST(request: Request) {
@@ -23,7 +25,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  let body: { subscription: SerializedPushSubscription; reminderTime?: string }
+  let body: { subscription: SerializedPushSubscription; reminderTime?: string; timezone?: string }
   try {
     body = await request.json()
   } catch {
@@ -31,6 +33,7 @@ export async function POST(request: Request) {
   }
 
   const { subscription, reminderTime = "08:00" } = body
+  const timezone = isValidTimeZone(body.timezone) ? body.timezone : null
   if (!TIME_RE.test(reminderTime)) {
     return NextResponse.json({ error: "reminderTime must be HH:MM" }, { status: 400 })
   }
@@ -46,6 +49,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Missing subscription keys" }, { status: 400 })
   }
 
+  // A device's endpoint belongs to whoever subscribed it last; otherwise a
+  // shared or re-used device keeps getting a previous account's reminders.
+  await db
+    .delete(pushSubscriptions)
+    .where(and(eq(pushSubscriptions.endpoint, subscription.endpoint), ne(pushSubscriptions.userId, userId)))
+
   // Upsert by (user_id, endpoint).
   const [existing] = await db
     .select({ id: pushSubscriptions.id })
@@ -56,7 +65,7 @@ export async function POST(request: Request) {
   if (existing) {
     await db
       .update(pushSubscriptions)
-      .set({ p256dh, auth, reminderTime, enabled: true, updatedAt: new Date() })
+      .set({ p256dh, auth, reminderTime, timezone, enabled: true, updatedAt: new Date() })
       .where(eq(pushSubscriptions.id, existing.id))
   } else {
     await db.insert(pushSubscriptions).values({
@@ -65,6 +74,7 @@ export async function POST(request: Request) {
       p256dh,
       auth,
       reminderTime,
+      timezone,
       enabled: true,
     })
   }
@@ -103,7 +113,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  let body: { endpoint: string; reminderTime: string }
+  let body: { endpoint: string; reminderTime: string; timezone?: string }
   try {
     body = await request.json()
   } catch {
@@ -118,10 +128,18 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "reminderTime must be HH:MM" }, { status: 400 })
   }
 
-  await db
+  const timezone = isValidTimeZone(body.timezone) ? body.timezone : null
+
+  const updated = await db
     .update(pushSubscriptions)
-    .set({ reminderTime, updatedAt: new Date() })
+    .set({ reminderTime, timezone, updatedAt: new Date() })
     .where(and(eq(pushSubscriptions.userId, userId), eq(pushSubscriptions.endpoint, endpoint)))
+    .returning({ id: pushSubscriptions.id })
+
+  if (updated.length === 0) {
+    // This device's subscription belongs to another account (or was removed).
+    return NextResponse.json({ error: "Subscription not found" }, { status: 404 })
+  }
 
   return NextResponse.json({ success: true })
 }

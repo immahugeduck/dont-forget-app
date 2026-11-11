@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { pushSubscriptions, taskReminders, checklists, deviceTokens } from "@/lib/db/schema"
 import { and, eq, inArray, isNull, lt, lte, or } from "drizzle-orm"
+import { wallClock } from "@/lib/reminder-clock"
 import { isFcmConfigured, sendFcmToTokens, type FcmPayload } from "@/lib/fcm"
 import { getWebPush } from "@/lib/webpush"
 
@@ -11,10 +12,12 @@ export const maxDuration = 60
 /**
  * Delivers daily "plan your day" nudges and due task reminders.
  *
- * Safe to call as often as you like (Vercel's daily cron plus the GitHub
- * "Send reminders" workflow every 15 minutes): each subscription's daily
- * nudge goes out once per UTC day, at the first run at or after its
- * reminder_time (stored in UTC), and task reminders are marked sent.
+ * Safe to call as often as you like, from more than one scheduler at once
+ * (Vercel's daily cron, the GitHub workflow, an external cron): each
+ * subscription's daily nudge goes out once per day in its own time zone, at
+ * the first run at or after its reminder_time, and each task reminder once.
+ * Rows are claimed with a conditional update before sending, so overlapping
+ * runs can't both send the same one.
  */
 
 async function sendToDeviceTokens(tokens: string[], payload: FcmPayload): Promise<number> {
@@ -78,22 +81,27 @@ export async function GET(request: Request) {
   let dailySent = 0
   let dailyFailed = 0
   if (webPushReady) {
-    const dueSubs = await db
-      .select()
-      .from(pushSubscriptions)
-      .where(
-        and(
-          eq(pushSubscriptions.enabled, true),
-          lte(pushSubscriptions.reminderTime, nowHHMM),
-          or(isNull(pushSubscriptions.lastSentOn), lt(pushSubscriptions.lastSentOn, todayUTC)),
-        ),
-      )
+    const subs = await db.select().from(pushSubscriptions).where(eq(pushSubscriptions.enabled, true))
     const payload = JSON.stringify(dailyPayload)
-    for (const sub of dueSubs) {
+    for (const sub of subs) {
+      // reminder_time is local to the subscription's time zone (UTC for older rows).
+      const { day, hhmm } = wallClock(now, sub.timezone)
+      if (sub.reminderTime > hhmm || (sub.lastSentOn !== null && sub.lastSentOn >= day)) continue
+      // Claim today's nudge first. Marked handled even if sending fails, so a
+      // broken endpoint isn't retried all day.
+      const claimed = await db
+        .update(pushSubscriptions)
+        .set({ lastSentOn: day })
+        .where(
+          and(
+            eq(pushSubscriptions.id, sub.id),
+            or(isNull(pushSubscriptions.lastSentOn), lt(pushSubscriptions.lastSentOn, day)),
+          ),
+        )
+        .returning({ id: pushSubscriptions.id })
+      if (claimed.length === 0) continue
       if (await sendToSub(sub, payload)) dailySent++
       else dailyFailed++
-      // Mark as handled either way so a broken endpoint isn't retried all day.
-      await db.update(pushSubscriptions).set({ lastSentOn: todayUTC }).where(eq(pushSubscriptions.id, sub.id))
     }
   }
 
@@ -127,6 +135,14 @@ export async function GET(request: Request) {
     .where(and(eq(taskReminders.sent, false), lte(taskReminders.reminderDatetime, now)))
 
   for (const reminder of dueReminders) {
+    // Claim it so an overlapping run skips it; released below if sending fails.
+    const claimed = await db
+      .update(taskReminders)
+      .set({ sent: true })
+      .where(and(eq(taskReminders.id, reminder.id), eq(taskReminders.sent, false)))
+      .returning({ id: taskReminders.id })
+    if (claimed.length === 0) continue
+
     const [cl] = await db
       .select({ text: checklists.text, date: checklists.date, completed: checklists.completed })
       .from(checklists)
@@ -134,10 +150,7 @@ export async function GET(request: Request) {
       .limit(1)
 
     // Nothing to remind about if the task is gone or already done.
-    if (!cl || cl.completed) {
-      await db.update(taskReminders).set({ sent: true }).where(eq(taskReminders.id, reminder.id))
-      continue
-    }
+    if (!cl || cl.completed) continue
 
     const userSubs = webPushReady
       ? await db
@@ -154,8 +167,7 @@ export async function GET(request: Request) {
 
     if (userSubs.length === 0 && userDevices.length === 0) {
       // No server channel for this user (e.g. they only use the Android app,
-      // which shows this reminder itself). Mark it so it isn't retried forever.
-      await db.update(taskReminders).set({ sent: true }).where(eq(taskReminders.id, reminder.id))
+      // which shows this reminder itself). Leave it claimed so it isn't retried forever.
       continue
     }
 
@@ -168,9 +180,10 @@ export async function GET(request: Request) {
     const nativeSent = await sendToDeviceTokens(userDevices.map((d) => d.token), { title: "Task Reminder", body, url })
 
     if (webResults.some(Boolean) || nativeSent > 0) {
-      await db.update(taskReminders).set({ sent: true }).where(eq(taskReminders.id, reminder.id))
       taskRemindersSent++
     } else {
+      // Nothing got through: release it so the next run tries again.
+      await db.update(taskReminders).set({ sent: false }).where(eq(taskReminders.id, reminder.id))
       taskRemindersFailed++
     }
   }

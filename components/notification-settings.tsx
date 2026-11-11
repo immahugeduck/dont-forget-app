@@ -39,10 +39,16 @@ export function NotificationSettings({ onClose }: NotificationSettingsProps) {
     }
   }
 
+  const [timeError, setTimeError] = useState<string | null>(null)
+
   const handleTimeChange = async (time: string) => {
+    const previous = localTime
     setLocalTime(time)
-    if (isSubscribed) {
-      await updateReminderTime(time)
+    setTimeError(null)
+    if (isSubscribed && !(await updateReminderTime(time))) {
+      // Don't show a time the server never saved.
+      setLocalTime(previous)
+      setTimeError("Couldn't save the new time. Make sure you're signed in and online, then try again.")
     }
   }
 
@@ -136,7 +142,8 @@ export function NotificationSettings({ onClose }: NotificationSettingsProps) {
               <Clock className="w-4 h-4 text-muted-foreground flex-shrink-0" />
               <div className="flex-1">
                 <p className="text-sm font-medium">Reminder time</p>
-                <p className="text-xs text-muted-foreground">{isNative ? "Daily nudge at this time" : "Daily nudge at this time (your local time, may arrive up to 15 min late)"}</p>
+                <p className="text-xs text-muted-foreground">{isNative ? "Daily nudge at this time" : "Daily nudge at this time (your local time, may arrive a few minutes late)"}</p>
+                {timeError && <p className="text-xs text-destructive mt-1">{timeError}</p>}
               </div>
               <input
                 type="time"
