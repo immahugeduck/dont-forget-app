@@ -44,6 +44,8 @@ export interface TaskReminder {
   checklist_id: string
   reminder_datetime: string
   sent: boolean
+  /** "due" = follows the due time automatically; "manual" = custom time. */
+  source?: "due" | "manual"
 }
 
 interface DayChecklistProps {
@@ -126,19 +128,9 @@ function SortableTaskItem({
 
   const handleSetDueTime = (checklistId: string, time: string | null) => {
     if (onDueTimeSet) {
+      // The server schedules the reminder at the due time (in this device's
+      // time zone) and moves or removes it when the due time changes.
       onDueTimeSet(checklistId, time)
-      
-      // Auto-create reminder if notifications are enabled and time is set
-      if (time && notificationsEnabled && onReminderSet && date) {
-        const [hours, minutes] = time.split(":").map(Number)
-        const reminderDate = new Date(date)
-        reminderDate.setHours(hours, minutes, 0, 0)
-        
-        // Only set reminder if it's in the future
-        if (reminderDate > new Date()) {
-          onReminderSet(checklistId, reminderDate.toISOString())
-        }
-      }
     }
     setOpenDueTimeId(null)
   }

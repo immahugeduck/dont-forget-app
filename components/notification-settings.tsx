@@ -25,7 +25,14 @@ export function NotificationSettings({ onClose }: NotificationSettingsProps) {
     unsubscribe,
     updateReminderTime,
     sendTestNotification,
+    scheduleTestNotification,
   } = useNotifications()
+  const [scheduledTest, setScheduledTest] = useState<{ at: Date | null; error?: boolean } | null>(null)
+
+  const handleScheduledTest = async () => {
+    const at = await scheduleTestNotification(60)
+    setScheduledTest(at ? { at } : { at: null, error: true })
+  }
 
   const [localTime, setLocalTime] = useState(reminderTime)
   useEffect(() => setLocalTime(reminderTime), [reminderTime])
@@ -191,6 +198,23 @@ export function NotificationSettings({ onClose }: NotificationSettingsProps) {
                     ? "Failed — try again"
                     : "Send test notification"}
             </Button>
+          )}
+
+          {/* Scheduled test: proves reminders arrive on time with the app closed */}
+          {isSubscribed && (
+            <div className="space-y-1">
+              <Button variant="outline" size="sm" onClick={() => void handleScheduledTest()} className="w-full gap-2">
+                <AlarmClock className="w-4 h-4" />
+                Test a reminder in 1 minute
+              </Button>
+              {scheduledTest && (
+                <p className="text-xs text-muted-foreground" role="status">
+                  {scheduledTest.error
+                    ? "Couldn't schedule the test. Check you're signed in and online."
+                    : `Due at ${scheduledTest.at!.toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })}. Close this ${isNative ? "app and lock your phone" : "tab"} now — it should still arrive.`}
+                </p>
+              )}
+            </div>
           )}
         </div>
       )}

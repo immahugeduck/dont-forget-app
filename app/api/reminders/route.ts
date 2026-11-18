@@ -3,19 +3,7 @@ import { db } from "@/lib/db"
 import { taskReminders } from "@/lib/db/schema"
 import { getUserId } from "@/lib/auth-helpers"
 import { and, eq } from "drizzle-orm"
-
-type ReminderRow = typeof taskReminders.$inferSelect
-
-function toReminder(r: ReminderRow) {
-  return {
-    id: r.id,
-    user_id: r.userId,
-    checklist_id: r.checklistId,
-    reminder_datetime: r.reminderDatetime,
-    sent: r.sent,
-    created_at: r.createdAt,
-  }
-}
+import { toReminderJson as toReminder, type ReminderRow } from "@/lib/due-reminders"
 
 export async function GET() {
   const userId = await getUserId()
@@ -67,13 +55,13 @@ export async function POST(request: Request) {
   if (existing) {
     ;[reminder] = await db
       .update(taskReminders)
-      .set({ reminderDatetime: reminderDate, sent: false })
+      .set({ reminderDatetime: reminderDate, sent: false, source: "manual" })
       .where(and(eq(taskReminders.id, existing.id), eq(taskReminders.userId, userId)))
       .returning()
   } else {
     ;[reminder] = await db
       .insert(taskReminders)
-      .values({ userId, checklistId, reminderDatetime: reminderDate, sent: false })
+      .values({ userId, checklistId, reminderDatetime: reminderDate, sent: false, source: "manual" })
       .returning()
   }
 

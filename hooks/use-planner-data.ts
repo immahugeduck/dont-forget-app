@@ -6,6 +6,15 @@ import { ChecklistItem, TaskReminder } from "@/components/day-checklist"
 import { notifyDataChanged } from "@/lib/native-reminders"
 import { flushQueue, pendingCount, sendOrQueue, QUEUE_FLUSHED_EVENT } from "@/lib/offline-queue"
 
+/** This device's IANA time zone, e.g. "America/Indiana/Indianapolis". */
+function deviceTimeZone(): string | undefined {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined
+  } catch {
+    return undefined
+  }
+}
+
 export interface Task {
   id: string
   user_id: string
@@ -403,6 +412,7 @@ export function usePlannerData(weekStartDate: Date, category: string) {
           date,
           category,
           items,
+          tz: deviceTimeZone(),
         })
         if (!res) {
           setStatus("offline")
@@ -428,9 +438,17 @@ export function usePlannerData(weekStartDate: Date, category: string) {
         const res = await fetch("/api/checklists", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ id: checklistId, due_time: dueTime }),
+          body: JSON.stringify({ id: checklistId, due_time: dueTime, tz: deviceTimeZone() }),
         })
         if (!res.ok) throw new Error("Failed to save due time")
+        // The server schedules (or moves/removes) the reminder at the due time.
+        const { reminder } = (await res.json().catch(() => ({}))) as { reminder?: TaskReminder | null }
+        setReminders((prev) => {
+          const next = { ...prev }
+          if (reminder) next[checklistId] = reminder
+          else if (next[checklistId]?.source === "due") delete next[checklistId]
+          return next
+        })
         notifyDataChanged()
 
         setChecklists((prev) => {

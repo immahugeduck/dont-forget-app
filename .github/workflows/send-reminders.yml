@@ -1,8 +1,10 @@
 name: Send reminders
 
-# Vercel's Hobby plan only allows a once-a-day cron (08:00 UTC), so web push
-# daily nudges and task reminders would arrive hours late. This calls the same
-# endpoint every 15 minutes; the endpoint sends each daily nudge once per day.
+# Backup scheduler only. On-time delivery comes from Supabase pg_cron, which
+# calls /api/notifications/send every minute when something is due (see
+# scripts/011_minute_reminder_scheduler.sql). GitHub's schedule drifts 10-40
+# minutes, so this just catches anything missed if the database scheduler is
+# ever down. The endpoint never sends the same reminder twice.
 on:
   schedule:
     - cron: "*/15 * * * *"
