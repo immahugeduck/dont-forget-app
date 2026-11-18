@@ -33,3 +33,13 @@ export function wallClock(now: Date, tz: string | null): { day: string; hhmm: st
   )
   return { day: `${parts.year}-${parts.month}-${parts.day}`, hhmm: `${parts.hour}:${parts.minute}` }
 }
+
+/**
+ * When a daily reminder is turned on (or its time changed) after today's time
+ * has already passed, returns today's day so the first nudge comes tomorrow
+ * instead of immediately. Otherwise null.
+ */
+export function skipTodayIfPassed(now: Date, tz: string | null, reminderTime: string): string | null {
+  const { day, hhmm } = wallClock(now, tz)
+  return reminderTime <= hhmm ? day : null
+}
