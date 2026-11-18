@@ -351,9 +351,9 @@ export function PlannerPage() {
         <div className="max-w-lg mx-auto px-4 py-4">
           {/* Top Row */}
           <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <div
-                className="w-10 h-10 rounded-xl flex items-center justify-center"
+                className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-xl flex items-center justify-center"
                 style={{ backgroundColor: activeCategory.color }}
               >
                 <Zap className="w-5 h-5 text-background" />
@@ -366,7 +366,8 @@ export function PlannerPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-2">
+            {/* Phones: tighter icons so the row fits 360-390 px screens without zooming out */}
+            <div className="flex items-center shrink-0 gap-0.5 sm:gap-2 [&_button]:size-8 sm:[&_button]:size-9">
               <StatusIndicator status={status} />
 
               {user ? (

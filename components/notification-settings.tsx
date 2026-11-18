@@ -149,7 +149,7 @@ export function NotificationSettings({ onClose }: NotificationSettingsProps) {
               <Clock className="w-4 h-4 text-muted-foreground flex-shrink-0" />
               <div className="flex-1">
                 <p className="text-sm font-medium">Reminder time</p>
-                <p className="text-xs text-muted-foreground">{isNative ? "Daily nudge at this time" : "Daily nudge at this time (your local time, may arrive a few minutes late)"}</p>
+                <p className="text-xs text-muted-foreground">{isNative ? "Daily nudge at this time" : "Daily nudge at this time (your local time). Task reminders go out at their due time, even with this tab closed."}</p>
                 {timeError && <p className="text-xs text-destructive mt-1">{timeError}</p>}
               </div>
               <input

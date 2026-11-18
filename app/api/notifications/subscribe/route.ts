@@ -3,7 +3,7 @@ import { db } from "@/lib/db"
 import { pushSubscriptions } from "@/lib/db/schema"
 import { getUserId } from "@/lib/auth-helpers"
 import { and, eq, ne } from "drizzle-orm"
-import { isValidTimeZone } from "@/lib/reminder-clock"
+import { isValidTimeZone, skipTodayIfPassed } from "@/lib/reminder-clock"
 
 /** Shape of the serialized PushSubscription received from the client */
 interface SerializedPushSubscription {
@@ -18,6 +18,13 @@ interface SerializedPushSubscription {
 // Zero-padded 24h "HH:MM", local to `timezone` when one is sent (else UTC,
 // from older clients). The send job compares these as strings.
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/
+
+// Turning reminders on after today's time has passed shouldn't fire today's
+// nudge straight away; the first one comes tomorrow.
+function skipToday(reminderTime: string, timezone: string | null): { lastSentOn?: string } {
+  const day = skipTodayIfPassed(new Date(), timezone, reminderTime)
+  return day ? { lastSentOn: day } : {}
+}
 
 export async function POST(request: Request) {
   const userId = await getUserId()
@@ -65,7 +72,7 @@ export async function POST(request: Request) {
   if (existing) {
     await db
       .update(pushSubscriptions)
-      .set({ p256dh, auth, reminderTime, timezone, enabled: true, updatedAt: new Date() })
+      .set({ p256dh, auth, reminderTime, timezone, enabled: true, updatedAt: new Date(), ...skipToday(reminderTime, timezone) })
       .where(eq(pushSubscriptions.id, existing.id))
   } else {
     await db.insert(pushSubscriptions).values({
@@ -75,6 +82,7 @@ export async function POST(request: Request) {
       auth,
       reminderTime,
       timezone,
+      ...skipToday(reminderTime, timezone),
       enabled: true,
     })
   }
@@ -132,7 +140,7 @@ export async function PATCH(request: Request) {
 
   const updated = await db
     .update(pushSubscriptions)
-    .set({ reminderTime, timezone, updatedAt: new Date() })
+    .set({ reminderTime, timezone, updatedAt: new Date(), ...skipToday(reminderTime, timezone) })
     .where(and(eq(pushSubscriptions.userId, userId), eq(pushSubscriptions.endpoint, endpoint)))
     .returning({ id: pushSubscriptions.id })
 
