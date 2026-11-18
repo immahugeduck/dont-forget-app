@@ -262,17 +262,20 @@ function formatTime(hhmm: string): string {
   return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
 }
 
-/** Fire a test notification a few seconds from now. */
-export async function sendLocalTest(): Promise<boolean> {
+/** Fire a test notification `delayMs` from now (default 3 s). */
+export async function sendLocalTest(delayMs = 3_000): Promise<boolean> {
   const { LocalNotifications } = await import("@capacitor/local-notifications")
   try {
     await LocalNotifications.schedule({
       notifications: [
         {
-          id: notificationId("test"),
-          title: "Don't Forget 🗓",
-          body: "Test reminder — notifications are working!",
-          schedule: { at: new Date(Date.now() + 3_000), allowWhileIdle: true },
+          id: notificationId(delayMs > 10_000 ? "test-scheduled" : "test"),
+          title: delayMs > 10_000 ? "Scheduled test reminder ⏰" : "Don't Forget 🗓",
+          body:
+            delayMs > 10_000
+              ? `Scheduled for ${new Date(Date.now() + delayMs).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} — reminders are working.`
+              : "Test reminder — notifications are working!",
+          schedule: { at: new Date(Date.now() + delayMs), allowWhileIdle: true },
           channelId: CHANNEL_ID,
           smallIcon: "ic_stat_notify",
           extra: { url: "/" },

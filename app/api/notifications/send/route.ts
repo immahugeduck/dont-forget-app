@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
 import { pushSubscriptions, taskReminders, checklists, deviceTokens } from "@/lib/db/schema"
-import { and, eq, inArray, isNull, lt, lte, or } from "drizzle-orm"
+import { and, eq, inArray, isNotNull, isNull, lt, lte, or } from "drizzle-orm"
 import { wallClock } from "@/lib/reminder-clock"
 import { isFcmConfigured, sendFcmToTokens, type FcmPayload } from "@/lib/fcm"
 import { getWebPush } from "@/lib/webpush"
+import { checkTickAuth } from "@/lib/tick-auth"
+import { loadTickSecret } from "@/lib/tick-secret"
 
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
@@ -31,11 +33,19 @@ async function sendToDeviceTokens(tokens: string[], payload: FcmPayload): Promis
 
 type SubRow = typeof pushSubscriptions.$inferSelect
 
-async function sendToSub(sub: SubRow, payload: string): Promise<boolean> {
+// Task reminders are time-critical: ask the push service to wake the device
+// now (urgency high), and drop the message if it cannot be delivered within
+// 12 hours (phone off all day) rather than show a stale reminder much later.
+const TASK_PUSH_OPTIONS = { urgency: "high" as const, TTL: 12 * 60 * 60 }
+const DAILY_PUSH_OPTIONS = { urgency: "normal" as const, TTL: 6 * 60 * 60 }
+
+type PushOptions = { urgency: "high" | "normal"; TTL: number }
+
+async function sendToSub(sub: SubRow, payload: string, options: PushOptions = DAILY_PUSH_OPTIONS): Promise<boolean> {
   const webpush = getWebPush()
   if (!webpush) return false
   try {
-    await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload)
+    await webpush.sendNotification({ endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } }, payload, options)
     return true
   } catch (err: unknown) {
     const statusCode = (err as { statusCode?: number })?.statusCode
@@ -58,9 +68,11 @@ function formatTaskDate(dateKey: string | undefined): string {
 }
 
 export async function GET(request: Request) {
-  const authHeader = request.headers.get("authorization")
-  const cronSecret = process.env.CRON_SECRET
-  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
+  const authorized = await checkTickAuth(request.headers.get("authorization"), {
+    cronSecret: process.env.CRON_SECRET,
+    loadDbSecret: loadTickSecret,
+  })
+  if (!authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
@@ -105,6 +117,32 @@ export async function GET(request: Request) {
     }
   }
 
+  // --- Scheduled test pushes ("Test in 1 minute") ---
+  let testsSent = 0
+  if (webPushReady) {
+    const dueTests = await db
+      .select()
+      .from(pushSubscriptions)
+      .where(and(isNotNull(pushSubscriptions.testAt), lte(pushSubscriptions.testAt, new Date(now.getTime() + 30_000))))
+    for (const sub of dueTests) {
+      const claimed = await db
+        .update(pushSubscriptions)
+        .set({ testAt: null })
+        .where(and(eq(pushSubscriptions.id, sub.id), isNotNull(pushSubscriptions.testAt)))
+        .returning({ id: pushSubscriptions.id })
+      if (claimed.length === 0) continue
+      const scheduledFor = sub.testAt ? new Date(sub.testAt) : now
+      const lateSec = Math.max(0, Math.round((Date.now() - scheduledFor.getTime()) / 1000))
+      const payload = JSON.stringify({
+        title: "Scheduled test reminder ⏰",
+        body: `Scheduled for ${scheduledFor.toISOString().slice(11, 16)} UTC, sent ${lateSec}s after. Reminders are working.`,
+        url: "/",
+        tag: "scheduled-test",
+      })
+      if (await sendToSub(sub, payload, TASK_PUSH_OPTIONS)) testsSent++
+    }
+  }
+
   // --- Daily nudges (native FCM; native apps also schedule these locally) ---
   if (fcmReady) {
     const dueDevices = await db
@@ -132,7 +170,9 @@ export async function GET(request: Request) {
   const dueReminders = await db
     .select()
     .from(taskReminders)
-    .where(and(eq(taskReminders.sent, false), lte(taskReminders.reminderDatetime, now)))
+    // Reminders due within the next 30 s go out now: the scheduler ticks once a
+    // minute, so waiting would make them up to a minute late.
+    .where(and(eq(taskReminders.sent, false), lte(taskReminders.reminderDatetime, new Date(now.getTime() + 30_000))))
 
   for (const reminder of dueReminders) {
     // Claim it so an overlapping run skips it; released below if sending fails.
@@ -174,9 +214,17 @@ export async function GET(request: Request) {
     const taskDate = formatTaskDate(cl.date)
     const body = `${cl.text}${taskDate ? ` — ${taskDate}` : ""}`
     const url = `/?date=${encodeURIComponent(cl.date)}`
-    const payload = JSON.stringify({ title: "Task Reminder", body, url })
+    const payload = JSON.stringify({
+      title: "Task Reminder",
+      body,
+      url,
+      kind: "task",
+      checklistId: reminder.checklistId,
+      tag: `task-${reminder.checklistId}`,
+      dueAt: new Date(reminder.reminderDatetime).toISOString(),
+    })
 
-    const webResults = await Promise.all(userSubs.map((sub) => sendToSub(sub, payload)))
+    const webResults = await Promise.all(userSubs.map((sub) => sendToSub(sub, payload, TASK_PUSH_OPTIONS)))
     const nativeSent = await sendToDeviceTokens(userDevices.map((d) => d.token), { title: "Task Reminder", body, url })
 
     if (webResults.some(Boolean) || nativeSent > 0) {
@@ -191,7 +239,9 @@ export async function GET(request: Request) {
   return NextResponse.json({
     message: `Daily: ${dailySent} sent, ${dailyFailed} failed. Task reminders: ${taskRemindersSent} sent, ${taskRemindersFailed} failed`,
     time: nowHHMM,
+    at: now.toISOString(),
     channels: { webPush: webPushReady, fcm: fcmReady },
     taskReminders: { sent: taskRemindersSent, failed: taskRemindersFailed },
+    tests: { sent: testsSent },
   })
 }

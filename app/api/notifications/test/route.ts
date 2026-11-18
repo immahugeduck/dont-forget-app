@@ -12,7 +12,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  let body: { endpoint?: string; token?: string }
+  let body: { endpoint?: string; token?: string; delaySeconds?: number }
   try {
     body = await request.json()
   } catch {
@@ -71,6 +71,18 @@ export async function POST(request: Request) {
 
   if (!sub) {
     return NextResponse.json({ error: "Subscription not found" }, { status: 404 })
+  }
+
+  // Scheduled test: goes out through the real scheduler (Supabase pg_cron ->
+  // /api/notifications/send), so it proves reminders arrive with the app closed.
+  if (body.delaySeconds !== undefined) {
+    const delay = Math.min(Math.max(Number(body.delaySeconds) || 60, 30), 600)
+    const testAt = new Date(Date.now() + delay * 1000)
+    await db
+      .update(pushSubscriptions)
+      .set({ testAt })
+      .where(and(eq(pushSubscriptions.userId, userId), eq(pushSubscriptions.endpoint, endpoint)))
+    return NextResponse.json({ success: true, scheduledFor: testAt.toISOString() })
   }
 
   const pushSubscription = {

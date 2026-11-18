@@ -89,6 +89,8 @@ export const pushSubscriptions = pgTable("push_subscriptions", {
   enabled: boolean("enabled").notNull().default(true),
   // Day (YYYY-MM-DD, in `timezone`, else UTC) the daily reminder was last delivered.
   lastSentOn: date("last_sent_on", { mode: "string" }),
+  // When set, the scheduler sends a one-off test push at this time.
+  testAt: timestamp("test_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 })
@@ -115,6 +117,8 @@ export const taskReminders = pgTable("task_reminders", {
   checklistId: uuid("checklist_id").notNull(),
   reminderDatetime: timestamp("reminder_datetime", { withTimezone: true }).notNull(),
   sent: boolean("sent").default(false),
+  // "due" = follows the task's due time automatically; "manual" = user picked it.
+  source: text("source").notNull().default("manual"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 })
 

@@ -24,6 +24,8 @@ export interface UseNotificationsResult {
   unsubscribe: () => Promise<boolean>
   updateReminderTime: (time: string) => Promise<boolean>
   sendTestNotification: () => Promise<boolean>
+  /** Schedules a test through the real scheduler; resolves to the time it's due, or null. */
+  scheduleTestNotification: (delaySeconds?: number) => Promise<Date | null>
 }
 
 const WEB_TIME_KEY = "dontforget.web-reminder-time"
@@ -292,6 +294,29 @@ export function useNotifications(): UseNotificationsResult {
     }
   }, [isNative, currentEndpoint])
 
+  const scheduleTestNotification = useCallback(
+    async (delaySeconds = 60): Promise<Date | null> => {
+      if (isNative) {
+        return (await native.sendLocalTest(delaySeconds * 1000)) ? new Date(Date.now() + delaySeconds * 1000) : null
+      }
+      if (!currentEndpoint) return null
+      try {
+        const response = await fetch("/api/notifications/test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ endpoint: currentEndpoint, delaySeconds }),
+        })
+        if (!response.ok) return null
+        const { scheduledFor } = (await response.json()) as { scheduledFor: string }
+        return new Date(scheduledFor)
+      } catch (err) {
+        console.error("Scheduled test error:", err)
+        return null
+      }
+    },
+    [isNative, currentEndpoint],
+  )
+
   return {
     isSupported,
     unsupportedReason,
@@ -306,5 +331,6 @@ export function useNotifications(): UseNotificationsResult {
     unsubscribe,
     updateReminderTime,
     sendTestNotification,
+    scheduleTestNotification,
   }
 }
