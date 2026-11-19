@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { Share, PlusSquare, X } from "lucide-react"
-import { iosInstallState } from "@/lib/platform"
+import { usePathname } from "next/navigation"
+import { iosInstallState, installPromptAllowedOn } from "@/lib/platform"
 
 const DISMISS_KEY = "dontforget.ios-install-dismissed"
 
@@ -12,6 +13,7 @@ const DISMISS_KEY = "dontforget.ios-install-dismissed"
  */
 export function InstallPrompt() {
   const [state, setState] = useState<"safari" | "other-browser" | "none">("none")
+  const pathname = usePathname()
 
   useEffect(() => {
     const standalone =
@@ -22,7 +24,7 @@ export function InstallPrompt() {
     if (s !== "none" && Date.now() - dismissedAt > 7 * 86_400_000) setState(s)
   }, [])
 
-  if (state === "none") return null
+  if (state === "none" || !installPromptAllowedOn(pathname)) return null
 
   const dismiss = () => {
     localStorage.setItem(DISMISS_KEY, String(Date.now()))
