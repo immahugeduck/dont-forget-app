@@ -18,20 +18,12 @@ export const metadata: Metadata = {
   appleWebApp: { capable: true, title: "Don't Forget", statusBarStyle: "black-translucent" },
   icons: {
     icon: [
-      {
-        url: "/icon-light-32x32.png",
-        media: "(prefers-color-scheme: light)",
-      },
-      {
-        url: "/icon-dark-32x32.png",
-        media: "(prefers-color-scheme: dark)",
-      },
-      {
-        url: "/icon.svg",
-        type: "image/svg+xml",
-      },
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icons/favicon-32.png", sizes: "32x32", type: "image/png" },
+      { url: "/icons/favicon-16.png", sizes: "16x16", type: "image/png" },
+      { url: "/icons/icon.svg", type: "image/svg+xml" },
     ],
-    apple: "/apple-icon.png",
+    apple: [{ url: "/apple-touch-icon.png", sizes: "180x180" }],
   },
 }
 
@@ -41,7 +33,7 @@ export const viewport: Viewport = {
   // Pinch-zoom stays available (accessibility). Inputs use 16px text on
   // phones, so iOS doesn't auto-zoom when you tap one.
   viewportFit: "cover",
-  themeColor: "#0f0f11",
+  themeColor: "#0A0A0C",
 }
 
 export default function RootLayout({

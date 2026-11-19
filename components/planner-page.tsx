@@ -16,7 +16,7 @@ import { useNotifications } from "@/hooks/use-notifications"
 import { useCategories } from "@/hooks/use-categories"
 import { useTags } from "@/hooks/use-tags"
 import { TagSearch } from "@/components/tag-search"
-import { Calendar, BarChart3, Sparkles, Zap, LogIn, LogOut, User, CloudSun, CalendarDays, Bell } from "lucide-react"
+import { Calendar, BarChart3, Sparkles, LogIn, LogOut, User, CloudSun, CalendarDays, Bell } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { WeatherTab } from "@/components/weather-tab"
 import { FocusedDayView } from "@/components/focused-day-view"
@@ -352,14 +352,11 @@ export function PlannerPage() {
           {/* Top Row */}
           <div className="flex flex-wrap items-center justify-between gap-y-2 mb-4">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
-              <div
-                className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-xl flex items-center justify-center"
-                style={{ backgroundColor: activeCategory.color }}
-              >
-                <Zap className="w-5 h-5 text-background" />
-              </div>
+              <img src="/icons/icon-192.png" alt="" width={44} height={44} className="w-10 h-10 sm:w-11 sm:h-11 shrink-0 rounded-xl" />
               <div>
-                <h1 className="text-lg font-bold tracking-tight">Don&apos;t Forget</h1>
+                <h1 className="text-lg font-extrabold tracking-tight leading-tight">
+                  <span className="text-[#A855F7]">Don&apos;t</span> <span className="text-[#FAFAFF]">Forget</span>
+                </h1>
                 <p className="text-xs text-muted-foreground">
                   Week {weekNumber} · {currentWeekStart.getFullYear()}
                 </p>

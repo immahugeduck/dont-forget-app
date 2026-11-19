@@ -14,7 +14,7 @@ import { Label } from '@/components/ui/label'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { Zap } from 'lucide-react'
+import Image from 'next/image'
 
 export default function Page() {
   const [email, setEmail] = useState('')
@@ -59,11 +59,8 @@ export default function Page() {
     <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
       <div className="w-full max-w-sm">
         <div className="flex flex-col gap-6">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-              <Zap className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <span className="text-xl font-bold">Don&apos;t Forget</span>
+          <div className="flex justify-center mb-2">
+            <Image src="/brand/logo-stacked-transparent.png" alt="Don't Forget: reminders & events" width={554} height={473} priority className="w-44 h-auto" />
           </div>
           <Card>
             <CardHeader>
