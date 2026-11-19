@@ -4,6 +4,8 @@ import { pushSubscriptions, taskReminders, checklists, deviceTokens } from "@/li
 import { and, eq, inArray, isNotNull, isNull, lt, lte, or } from "drizzle-orm"
 import { wallClock } from "@/lib/reminder-clock"
 import { isFcmConfigured, sendFcmToTokens, type FcmPayload } from "@/lib/fcm"
+import { phoneHasLocalAlarm } from "@/lib/fcm-dedupe"
+import { logError } from "@/lib/error-log"
 import { getWebPush } from "@/lib/webpush"
 import { checkTickAuth } from "@/lib/tick-auth"
 import { loadTickSecret } from "@/lib/tick-secret"
@@ -24,7 +26,15 @@ export const maxDuration = 60
 
 async function sendToDeviceTokens(tokens: string[], payload: FcmPayload): Promise<number> {
   if (!isFcmConfigured() || tokens.length === 0) return 0
-  const { successCount, invalidTokens } = await sendFcmToTokens(tokens, payload)
+  let result: Awaited<ReturnType<typeof sendFcmToTokens>>
+  try {
+    result = await sendFcmToTokens(tokens, payload)
+  } catch (err) {
+    // A Firebase outage or bad credential must not stop web push / other users.
+    await logError("server/fcm-send", err, { context: { tokens: tokens.length } })
+    return 0
+  }
+  const { successCount, invalidTokens } = result
   if (invalidTokens.length > 0) {
     await db.delete(deviceTokens).where(inArray(deviceTokens.token, invalidTokens))
   }
@@ -151,6 +161,8 @@ export async function GET(request: Request) {
       .where(
         and(
           eq(deviceTokens.enabled, true),
+          // Phones that schedule their own alarms already show the daily nudge.
+          isNull(deviceTokens.localSyncedAt),
           lte(deviceTokens.reminderTime, nowHHMM),
           or(isNull(deviceTokens.lastSentOn), lt(deviceTokens.lastSentOn, todayUTC)),
         ),
@@ -198,14 +210,25 @@ export async function GET(request: Request) {
           .from(pushSubscriptions)
           .where(and(eq(pushSubscriptions.userId, reminder.userId), eq(pushSubscriptions.enabled, true)))
       : []
-    const userDevices = fcmReady
+    const allDevices = fcmReady
       ? await db
-          .select({ token: deviceTokens.token })
+          .select({
+            token: deviceTokens.token,
+            localSyncedAt: deviceTokens.localSyncedAt,
+            localCoveredUntil: deviceTokens.localCoveredUntil,
+          })
           .from(deviceTokens)
           .where(and(eq(deviceTokens.userId, reminder.userId), eq(deviceTokens.enabled, true)))
       : []
+    // Skip phones that already set an exact alarm for this reminder.
+    const changedAt = reminder.updatedAt ?? reminder.createdAt ?? null
+    const userDevices = allDevices.filter(
+      (d) => !phoneHasLocalAlarm(d, { changedAt, reminderAt: new Date(reminder.reminderDatetime) }),
+    )
+    const coveredOnPhone = allDevices.length - userDevices.length
 
     if (userSubs.length === 0 && userDevices.length === 0) {
+      if (coveredOnPhone > 0) taskRemindersSent++
       // No server channel for this user (e.g. they only use the Android app,
       // which shows this reminder itself). Leave it claimed so it isn't retried forever.
       continue
@@ -225,9 +248,9 @@ export async function GET(request: Request) {
     })
 
     const webResults = await Promise.all(userSubs.map((sub) => sendToSub(sub, payload, TASK_PUSH_OPTIONS)))
-    const nativeSent = await sendToDeviceTokens(userDevices.map((d) => d.token), { title: "Task Reminder", body, url })
+    const nativeSent = await sendToDeviceTokens(userDevices.map((d) => d.token), { title: "Task reminder", body, url, tag: `task-${reminder.checklistId}` })
 
-    if (webResults.some(Boolean) || nativeSent > 0) {
+    if (webResults.some(Boolean) || nativeSent > 0 || coveredOnPhone > 0) {
       taskRemindersSent++
     } else {
       // Nothing got through: release it so the next run tries again.

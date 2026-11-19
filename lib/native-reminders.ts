@@ -76,7 +76,7 @@ function notificationId(key: string): number {
   return (Math.abs(h) % 2_000_000_000) + 1
 }
 
-async function fetchSchedule(): Promise<ScheduleItem[] | null> {
+async function fetchSchedule(): Promise<{ items: ScheduleItem[]; serverTime: string | null; to: Date } | null> {
   const from = new Date()
   const to = new Date()
   to.setDate(to.getDate() + DAYS_AHEAD)
@@ -84,16 +84,16 @@ async function fetchSchedule(): Promise<ScheduleItem[] | null> {
     const res = await fetch(`/api/notifications/schedule?from=${dateKey(from)}&to=${dateKey(to)}`, {
       cache: "no-store",
     })
-    if (res.status === 401) return []
+    if (res.status === 401) return { items: [], serverTime: null, to }
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const { items } = (await res.json()) as { items: ScheduleItem[] }
+    const { items, serverTime } = (await res.json()) as { items: ScheduleItem[]; serverTime?: string }
     window.localStorage.setItem(CACHE_KEY, JSON.stringify(items))
-    return items
+    return { items, serverTime: serverTime ?? null, to }
   } catch {
     // Offline: fall back to the last schedule we saw.
     try {
       const cached = window.localStorage.getItem(CACHE_KEY)
-      return cached ? (JSON.parse(cached) as ScheduleItem[]) : null
+      return cached ? { items: JSON.parse(cached) as ScheduleItem[], serverTime: null, to } : null
     } catch {
       return null
     }
@@ -200,14 +200,17 @@ export function syncReminders(): Promise<void> {
 
 async function doSync() {
   const prefs = getPrefs()
+  const push = await import("@/lib/native-push")
   if (!prefs.enabled) {
     await cancelAll()
+    await push.unregisterDevice()
     return
   }
   if ((await checkPermission()) !== "granted") return
 
-  const items = await fetchSchedule()
-  if (items === null) return // offline with no cache: keep what's already scheduled
+  const schedule = await fetchSchedule()
+  if (schedule === null) return // offline with no cache: keep what's already scheduled
+  const { items } = schedule
 
   const { LocalNotifications } = await import("@capacitor/local-notifications")
   const now = Date.now()
@@ -261,6 +264,21 @@ async function doSync() {
   if (toSchedule.length > 0) {
     await LocalNotifications.schedule({ notifications: toSchedule })
   }
+
+  // Tell the server which reminders this phone now alarms for itself, so FCM
+  // only pushes the ones it doesn't have. Inexact alarms (no "Alarms &
+  // reminders" access) can be late, so then FCM sends everything.
+  if (schedule.serverTime) {
+    const exact = await exactAlarmsAllowed()
+    const capped = notifications.length > toSchedule.length
+    const coveredUntil = capped ? toSchedule[toSchedule.length - 1].schedule!.at! : schedule.to
+    await push.reportLocalSync(
+      exact
+        ? { localSyncedAt: schedule.serverTime, localCoveredUntil: new Date(coveredUntil).toISOString() }
+        : { localSyncedAt: null, localCoveredUntil: null },
+    )
+  }
+  void push.ensurePushRegistered()
 }
 
 function formatTime(hhmm: string): string {

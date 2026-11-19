@@ -10,13 +10,21 @@ import { and, eq } from "drizzle-orm"
  * push notifications via Firebase. Scoped to the logged-in user.
  */
 
+/** ISO time from the phone, or null. Sync times can't be in the future. */
+function parseSyncTime(v: unknown, clampToNow = true): Date | null {
+  if (typeof v !== "string") return null
+  const d = new Date(v)
+  if (Number.isNaN(d.getTime())) return null
+  return clampToNow && d.getTime() > Date.now() ? new Date() : d
+}
+
 export async function POST(request: Request) {
   const userId = await getUserId()
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
   }
 
-  let body: { token?: string; platform?: string; reminderTime?: string }
+  let body: { token?: string; platform?: string; reminderTime?: string; localSyncedAt?: string | null; localCoveredUntil?: string | null }
   try {
     body = await request.json()
   } catch {
@@ -24,9 +32,14 @@ export async function POST(request: Request) {
   }
 
   const { token, platform = "android", reminderTime = "08:00" } = body
-  if (!token) {
+  if (!token || typeof token !== "string" || token.length > 4096) {
     return NextResponse.json({ error: "Missing device token" }, { status: 400 })
   }
+  // Only update the local-alarm fields when the phone sent them.
+  const local =
+    "localSyncedAt" in body
+      ? { localSyncedAt: parseSyncTime(body.localSyncedAt), localCoveredUntil: parseSyncTime(body.localCoveredUntil, false) }
+      : {}
 
   // Upsert by (user_id, token).
   const [existing] = await db
@@ -38,10 +51,10 @@ export async function POST(request: Request) {
   if (existing) {
     await db
       .update(deviceTokens)
-      .set({ platform, reminderTime, enabled: true, updatedAt: new Date() })
+      .set({ platform, reminderTime, enabled: true, updatedAt: new Date(), ...local })
       .where(eq(deviceTokens.id, existing.id))
   } else {
-    await db.insert(deviceTokens).values({ userId, token, platform, reminderTime, enabled: true })
+    await db.insert(deviceTokens).values({ userId, token, platform, reminderTime, enabled: true, ...local })
   }
 
   return NextResponse.json({ success: true })
