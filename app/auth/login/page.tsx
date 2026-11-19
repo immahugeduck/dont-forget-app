@@ -12,15 +12,17 @@ import {
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import Link from 'next/link'
+import { AuthShell } from '@/components/auth-shell'
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-import { Zap } from 'lucide-react'
 
 export default function Page() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [unconfirmed, setUnconfirmed] = useState(false)
+  const [resent, setResent] = useState<string | null>(null)
   const router = useRouter()
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -30,7 +32,13 @@ export default function Page() {
 
     try {
       const { error } = await authClient.signIn.email({ email, password })
-      if (error) throw new Error(error.message || 'Invalid email or password')
+      if (error) {
+        if (/not confirmed/i.test(error.message)) {
+          setUnconfirmed(true)
+          throw new Error('Please confirm your email first. Check your inbox for the link.')
+        }
+        throw new Error(/invalid login/i.test(error.message) ? 'Wrong email or password.' : error.message)
+      }
       router.push('/')
       router.refresh()
     } catch (error: unknown) {
@@ -40,16 +48,13 @@ export default function Page() {
     }
   }
 
+  const resend = async () => {
+    const { error } = await authClient.resendConfirmation(email)
+    setResent(error ? error.message : 'Confirmation email sent. Check your inbox.')
+  }
+
   return (
-    <div className="flex min-h-svh w-full items-center justify-center p-6 md:p-10">
-      <div className="w-full max-w-sm">
-        <div className="flex flex-col gap-6">
-          <div className="flex items-center justify-center gap-2 mb-2">
-            <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
-              <Zap className="w-5 h-5 text-primary-foreground" />
-            </div>
-            <span className="text-xl font-bold">Don&apos;t Forget</span>
-          </div>
+    <AuthShell>
           <Card>
             <CardHeader>
               <CardTitle className="text-2xl">Welcome back</CardTitle>
@@ -66,6 +71,9 @@ export default function Page() {
                       id="email"
                       type="email"
                       placeholder="m@example.com"
+                      autoComplete="email"
+                      inputMode="email"
+                      className="h-11 text-base"
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
@@ -76,17 +84,30 @@ export default function Page() {
                     <Input
                       id="password"
                       type="password"
+                      autoComplete="current-password"
+                      className="h-11 text-base"
                       required
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                     />
                   </div>
-                  {error && <p className="text-sm text-red-500">{error}</p>}
-                  <Button type="submit" className="w-full" disabled={isLoading}>
+                  {error && <p className="text-sm text-red-500" role="alert">{error}</p>}
+                  {unconfirmed && (
+                    <Button type="button" variant="secondary" className="w-full h-11" onClick={() => void resend()}>
+                      Resend confirmation email
+                    </Button>
+                  )}
+                  {resent && <p className="text-sm text-muted-foreground" role="status">{resent}</p>}
+                  <Button type="submit" className="w-full h-11" disabled={isLoading}>
                     {isLoading ? 'Logging in...' : 'Login'}
                   </Button>
                 </div>
-                <div className="mt-4 text-center text-sm">
+                <div className="mt-3 text-center text-sm">
+                  <Link href="/auth/forgot-password" className="underline underline-offset-4 inline-block py-2">
+                    Forgot password?
+                  </Link>
+                </div>
+                <div className="mt-1 text-center text-sm">
                   Don&apos;t have an account?{' '}
                   <Link
                     href="/auth/sign-up"
@@ -98,8 +119,6 @@ export default function Page() {
               </form>
             </CardContent>
           </Card>
-        </div>
-      </div>
-    </div>
+    </AuthShell>
   )
 }

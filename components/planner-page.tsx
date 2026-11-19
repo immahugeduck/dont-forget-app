@@ -345,12 +345,12 @@ export function PlannerPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background pb-32">
+    <div className="min-h-screen bg-background pb-[calc(8rem+env(safe-area-inset-bottom))]">
       {/* Header */}
       <header className="sticky top-0 z-50 bg-background/80 backdrop-blur-xl border-b border-border">
-        <div className="max-w-lg mx-auto px-4 py-4">
+        <div className="max-w-lg md:max-w-3xl lg:max-w-6xl mx-auto py-4 pt-[max(1rem,env(safe-area-inset-top))] pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))]">
           {/* Top Row */}
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-y-2 mb-4">
             <div className="flex items-center gap-2 sm:gap-3 min-w-0">
               <div
                 className="w-9 h-9 sm:w-10 sm:h-10 shrink-0 rounded-xl flex items-center justify-center"
@@ -367,8 +367,9 @@ export function PlannerPage() {
             </div>
 
             {/* Phones: tighter icons so the row fits 360-390 px screens without zooming out */}
-            <div className="flex items-center shrink-0 gap-0.5 sm:gap-2 [&_button]:size-8 sm:[&_button]:size-9">
-              <StatusIndicator status={status} />
+            {/* Phones: toolbar gets its own full-width row with 44px touch targets */}
+            <div className="flex w-full sm:w-auto items-center justify-between sm:justify-end sm:gap-1 [&_button]:size-11">
+              <StatusIndicator status={user ? status : "local"} />
 
               {user ? (
                 <Button
@@ -376,12 +377,13 @@ export function PlannerPage() {
                   size="icon"
                   onClick={signOut}
                   title="Sign out"
+                aria-label="Sign out"
                 >
                   <LogOut className="w-5 h-5" />
                 </Button>
               ) : (
-                <Link href="/auth/login">
-                  <Button variant="ghost" size="icon" title="Sign in to sync">
+                <Link href="/auth/login" aria-label="Sign in to sync">
+                  <Button variant="ghost" size="icon" title="Sign in to sync" tabIndex={-1} aria-hidden="true">
                     <LogIn className="w-5 h-5" />
                   </Button>
                 </Link>
@@ -392,6 +394,7 @@ export function PlannerPage() {
                 size="icon"
                 onClick={handleOpenFocusedDay}
                 title="Focus on today"
+                aria-label="Focus on today"
               >
                 <CalendarDays className="w-5 h-5" />
               </Button>
@@ -407,6 +410,7 @@ export function PlannerPage() {
                 }}
                 className={showNotifications ? "bg-secondary" : ""}
                 title="Notifications"
+                aria-label="Notifications"
               >
                 <Bell className="w-5 h-5" />
               </Button>
@@ -422,6 +426,7 @@ export function PlannerPage() {
                 }}
                 className={showWeather ? "bg-secondary" : ""}
                 title="Weather"
+                aria-label="Weather"
               >
                 <CloudSun className="w-5 h-5" />
               </Button>
@@ -437,6 +442,7 @@ export function PlannerPage() {
                 }}
                 className={showStats ? "bg-secondary" : ""}
                 title="Stats"
+                aria-label="Stats"
               >
                 <BarChart3 className="w-5 h-5" />
               </Button>
@@ -459,7 +465,6 @@ export function PlannerPage() {
             <div className="flex items-center gap-2 mb-3 px-2 py-1.5 bg-secondary/50 rounded-lg text-sm">
               <User className="w-4 h-4 text-muted-foreground" />
               <span className="text-muted-foreground truncate">{user.email}</span>
-              <span className="text-xs text-green-500 ml-auto">Synced</span>
             </div>
           )}
 
@@ -476,7 +481,7 @@ export function PlannerPage() {
         </div>
       </header>
 
-      <main className="max-w-lg mx-auto px-4 pt-4">
+      <main className="max-w-lg md:max-w-3xl lg:max-w-6xl mx-auto pt-4 pl-[max(1rem,env(safe-area-inset-left))] pr-[max(1rem,env(safe-area-inset-right))]">
         {/* Weather Tab */}
         {showWeather && (
           <div className="mb-4 p-4 bg-card rounded-2xl border border-border">
@@ -526,7 +531,8 @@ export function PlannerPage() {
         {allTags.length > 0 && <TagFilter tags={allTags} activeTag={activeTag} onSelectTag={setActiveTag} />}
 
         {/* Day Cards */}
-        <div className="space-y-3 mt-4">
+        {/* Phone: one column. iPad portrait: two. iPad landscape / desktop: three. */}
+        <div className="grid gap-3 mt-4 md:grid-cols-2 lg:grid-cols-3">
           {ALL_SLOTS.map((slot, index) => {
             const isGoals = slot.id === "goals"
             const slotDate = isGoals ? undefined : weekDates[index]
@@ -544,8 +550,8 @@ export function PlannerPage() {
             const dayWeather = dateKey ? weatherData[dateKey] || null : null
 
             return (
+              <div key={slot.id} className={isGoals ? "md:col-span-full" : "min-w-0"}>
               <DayCard
-                key={slot.id}
                 slot={slot}
                 date={slotDate}
                 content={content}
@@ -570,6 +576,7 @@ export function PlannerPage() {
                 checklistTags={checklistTags}
                 onTagsExtracted={assignTagsToChecklist}
               />
+              </div>
             )
           })}
         </div>

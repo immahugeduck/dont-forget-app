@@ -1,8 +1,10 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Capacitor } from "@capacitor/core"
 import * as native from "@/lib/native-reminders"
+import { reportFailure, reportSuccess } from "@/lib/notify"
+import { toast } from "sonner"
 
 export type NotificationPermission = "default" | "granted" | "denied"
 
@@ -158,16 +160,27 @@ export function useNotifications(): UseNotificationsResult {
         try {
           const perm = await native.requestPermission()
           setPermission(perm === "prompt" ? "default" : perm)
-          if (perm !== "granted") return false
+          if (perm !== "granted") {
+            reportFailure("notifications", new DOMException("denied", "NotAllowedError"), { id: "perm" })
+            return false
+          }
           native.setPrefs({ enabled: true, dailyTime: time })
           setReminderTime(time)
           setIsSubscribed(true)
           const exact = await native.exactAlarmsAllowed()
           setExactAlarms(exact)
           await native.syncReminders()
+          if (!exact) {
+            toast.warning("Reminders may be a few minutes late", {
+              id: "exact-alarms",
+              description: 'Allow "Alarms & reminders" for Don\'t Forget so they ring on the minute.',
+              duration: 15_000,
+              action: { label: "Allow", onClick: () => void native.openExactAlarmSettings().then(() => native.syncReminders()) },
+            })
+          } else reportSuccess("Reminders are on", "They'll ring at each task's time, even with the app closed.")
           return true
         } catch (err) {
-          console.error("Enable reminders failed:", err)
+          reportFailure("your reminder settings", err, { id: "enable", source: "notifications/enable-native", retry: () => void subscribeRef.current?.(time) })
           return false
         } finally {
           setIsLoading(false)
@@ -182,7 +195,10 @@ export function useNotifications(): UseNotificationsResult {
       try {
         const perm = await Notification.requestPermission()
         setPermission(perm as NotificationPermission)
-        if (perm !== "granted") return false
+        if (perm !== "granted") {
+          reportFailure("notifications", new DOMException("denied", "NotAllowedError"), { id: "perm" })
+          return false
+        }
 
         await navigator.serviceWorker.register("/sw.js", { scope: "/" })
         const registration = await navigator.serviceWorker.ready
@@ -198,6 +214,7 @@ export function useNotifications(): UseNotificationsResult {
         })
         if (!response.ok) {
           await subscription.unsubscribe()
+          reportFailure("reminders on this device", response, { id: "enable", source: "notifications/subscribe", retry: () => void subscribeRef.current?.(time) })
           return false
         }
 
@@ -206,9 +223,10 @@ export function useNotifications(): UseNotificationsResult {
         setIsSubscribed(true)
         setCurrentEndpoint(subscription.endpoint)
         setReminderTime(time)
+        reportSuccess("Reminders are on", "They'll arrive at each task's time, even with the app closed.")
         return true
       } catch (err) {
-        console.error("Subscribe error:", err)
+        reportFailure("reminders on this device", err, { id: "enable", source: "notifications/subscribe", retry: () => void subscribeRef.current?.(time) })
         return false
       } finally {
         setIsLoading(false)
@@ -216,6 +234,8 @@ export function useNotifications(): UseNotificationsResult {
     },
     [isNative, isSupported, reminderTime],
   )
+  const subscribeRef = useRef(subscribe)
+  subscribeRef.current = subscribe
 
   const unsubscribe = useCallback(async (): Promise<boolean> => {
     if (isNative) {

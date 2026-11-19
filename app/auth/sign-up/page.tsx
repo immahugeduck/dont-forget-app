@@ -43,7 +43,7 @@ export default function Page() {
       })
       if (error) throw new Error(error.message || 'Could not create account')
       if (needsConfirmation) {
-        router.push('/auth/sign-up-success')
+        router.push(`/auth/sign-up-success?email=${encodeURIComponent(email)}`)
         return
       }
       router.push('/')

@@ -221,11 +221,12 @@ export function DayCard({
                     <Button
                       variant="ghost"
                       size="sm"
-                      className="h-7 px-2 text-xs gap-1"
+                      aria-label="Add task"
+                      className="h-11 min-w-11 px-3 text-sm gap-1.5 pointer-fine:h-8 pointer-fine:px-2 pointer-fine:text-xs"
                       onClick={() => setIsAddingTask(true)}
                     >
                       <ListTodo className="w-3.5 h-3.5" />
-                      <span className="hidden sm:inline">Add Task</span>
+                      <span>Add Task</span>
                     </Button>
                   </TooltipTrigger>
                   <TooltipContent side="top">

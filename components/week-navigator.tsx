@@ -52,6 +52,7 @@ export function WeekNavigator({
         variant="ghost"
         size="icon"
         onClick={onPrevious}
+        aria-label="Previous week"
         disabled={!canGoPrev}
         className="h-11 w-11 rounded-xl disabled:opacity-30"
       >
@@ -75,6 +76,7 @@ export function WeekNavigator({
         variant="ghost"
         size="icon"
         onClick={onNext}
+        aria-label="Next week"
         disabled={!canGoNext}
         className="h-11 w-11 rounded-xl disabled:opacity-30"
       >

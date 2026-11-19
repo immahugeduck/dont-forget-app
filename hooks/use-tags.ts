@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useCallback } from "react"
+import { authClient } from "@/lib/auth-client"
 
 export interface UserTag {
   id: string
@@ -225,9 +226,17 @@ export function useTags() {
     [tags],
   )
 
+  // Tags live on the server; signed-out users have none (and /api/tags would 401).
+  const { data: session, isPending: sessionPending } = authClient.useSession()
+  const signedIn = Boolean(session?.user)
   useEffect(() => {
-    loadTags()
-  }, [loadTags])
+    if (sessionPending) return
+    if (signedIn) loadTags()
+    else {
+      setTags([])
+      setIsLoading(false)
+    }
+  }, [loadTags, signedIn, sessionPending])
 
   return {
     tags,

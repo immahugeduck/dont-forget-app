@@ -41,6 +41,21 @@ function useSession() {
   return { data: user ? { user } : null, isPending }
 }
 
+async function postAuthEmail(body: Record<string, string>): Promise<AuthResult> {
+  try {
+    const res = await fetch("/api/auth/email", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    })
+    const data = (await res.json().catch(() => ({}))) as { error?: string; needsConfirmation?: boolean }
+    if (!res.ok) return { error: { message: data.error ?? `Something went wrong (${res.status}). Please try again.` } }
+    return { error: null, needsConfirmation: data.needsConfirmation }
+  } catch {
+    return { error: { message: "You're offline. Connect to the internet and try again." } }
+  }
+}
+
 export const authClient = {
   useSession,
   signIn: {
@@ -50,20 +65,24 @@ export const authClient = {
     },
   },
   signUp: {
-    async email({ email, password, name }: { email: string; password: string; name?: string }): Promise<AuthResult> {
-      const { data, error } = await supabase().auth.signUp({
-        email,
-        password,
-        options: {
-          data: name ? { name } : undefined,
-          emailRedirectTo: `${window.location.origin}/auth/callback`,
-        },
-      })
-      return {
-        error: error ? { message: error.message } : null,
-        needsConfirmation: !error && !data.session,
-      }
+    // Sign-up goes through our server so the confirmation email is sent by
+    // Resend (reliable) instead of Supabase's rate-limited mailer.
+    async email({ email, password }: { email: string; password: string; name?: string }): Promise<AuthResult> {
+      return postAuthEmail({ action: "signup", email, password })
     },
+  },
+  /** Re-send the confirmation link for an unconfirmed account. */
+  resendConfirmation(email: string): Promise<AuthResult> {
+    return postAuthEmail({ action: "resend", email })
+  },
+  /** Email a password reset link. */
+  requestPasswordReset(email: string): Promise<AuthResult> {
+    return postAuthEmail({ action: "recovery", email })
+  },
+  /** Set a new password (after following a reset link, which signs you in). */
+  async updatePassword(password: string): Promise<AuthResult> {
+    const { error } = await supabase().auth.updateUser({ password })
+    return { error: error ? { message: error.message } : null }
   },
   async signOut() {
     await supabase().auth.signOut()
