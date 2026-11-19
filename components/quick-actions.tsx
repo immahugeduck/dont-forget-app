@@ -14,7 +14,7 @@ export function QuickActions({ onJumpToDate, onJumpToToday, onClearWeek }: Quick
   const [isOpen, setIsOpen] = useState(false)
 
   return (
-    <div className="fixed bottom-6 right-6 flex flex-col-reverse items-end gap-3 z-50">
+    <div className="fixed bottom-[max(1.5rem,calc(env(safe-area-inset-bottom)+0.75rem))] right-[max(1.5rem,env(safe-area-inset-right))] flex flex-col-reverse items-end gap-3 z-50">
       {/* Action buttons */}
       {isOpen && (
         <div className="flex flex-col items-end gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
@@ -63,6 +63,8 @@ export function QuickActions({ onJumpToDate, onJumpToToday, onClearWeek }: Quick
       <Button
         onClick={() => setIsOpen(!isOpen)}
         size="icon"
+        aria-label={isOpen ? "Close quick actions" : "Quick actions"}
+        aria-expanded={isOpen}
         className={`
           h-14 w-14 rounded-full shadow-xl transition-all duration-200
           ${isOpen ? "rotate-45 bg-secondary text-foreground" : "bg-primary text-primary-foreground"}

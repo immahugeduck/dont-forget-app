@@ -179,7 +179,15 @@ export function syncReminders(): Promise<void> {
     return syncing
   }
   syncing = doSync()
-    .catch((err) => console.warn("[reminders] sync failed:", err))
+    .catch(async (err) => {
+      console.warn("[reminders] sync failed:", err)
+      const { reportFailure } = await import("@/lib/notify")
+      reportFailure("your reminders on this phone", err, {
+        id: "native-sync",
+        source: "native/sync-reminders",
+        retry: () => void syncReminders(),
+      })
+    })
     .finally(() => {
       syncing = null
       if (queued) {
