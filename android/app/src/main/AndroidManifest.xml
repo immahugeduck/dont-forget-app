@@ -34,11 +34,17 @@
                 android:resource="@xml/file_paths"></meta-data>
         </provider>
 
-        <!-- FCM: default channel used for background/system-tray notifications.
-             Must match the channel created at runtime and the channelId sent by the server. -->
+        <!-- FCM: system-tray notifications use the app's high-importance
+             "reminders" channel (created at runtime), the status-bar bell, and brand purple. -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="default" />
+            android:value="reminders" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@drawable/ic_stat_notify" />
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_color"
+            android:resource="@color/notify_accent" />
     </application>
 
     <!-- Permissions -->

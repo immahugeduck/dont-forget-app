@@ -47,6 +47,8 @@ export interface FcmPayload {
   title: string
   body: string
   url?: string
+  /** Same tag replaces an earlier notification instead of stacking. */
+  tag?: string
 }
 
 export interface FcmSendResult {
@@ -81,7 +83,10 @@ export async function sendFcmToTokens(tokens: string[], payload: FcmPayload): Pr
       data: { url: payload.url ?? "/" },
       android: {
         priority: "high",
-        notification: { channelId: "default", clickAction: "OPEN_APP" },
+        // Drop it if the phone is off for 12 h rather than show a stale reminder.
+        ttl: 12 * 60 * 60 * 1000,
+        // "reminders" is the high-importance channel the app creates.
+        notification: { channelId: "reminders", icon: "ic_stat_notify", color: "#A855F7", tag: payload.tag, defaultSound: true },
       },
     })
 
@@ -103,4 +108,26 @@ export async function sendFcmToTokens(tokens: string[], payload: FcmPayload): Pr
   }
 
   return { successCount, failureCount, invalidTokens }
+}
+
+/**
+ * Health check: a dry-run send (validate_only) to a topic. Proves the service
+ * account works and FCM accepts our messages, without notifying anyone.
+ */
+export async function fcmDryRun(): Promise<{ ok: boolean; error?: string }> {
+  const app = getApp()
+  if (!app) return { ok: false, error: "not-configured" }
+  try {
+    await getMessaging(app).send(
+      {
+        topic: "dontforget-healthcheck",
+        notification: { title: "Don't Forget", body: "health check" },
+        android: { priority: "high", notification: { channelId: "reminders", icon: "ic_stat_notify" } },
+      },
+      true,
+    )
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: (err as { code?: string }).code ?? "send-failed" }
+  }
 }

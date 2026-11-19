@@ -18,17 +18,17 @@ const config: CapacitorConfig = {
   },
   android: {
     // Show the native splash until the remote page is ready to paint.
-    backgroundColor: "#0f0f11",
+    backgroundColor: "#0A0A0C",
   },
   plugins: {
     SplashScreen: {
       launchShowDuration: 1500,
-      backgroundColor: "#0f0f11",
+      backgroundColor: "#0A0A0C",
       showSpinner: false,
       androidSplashResourceName: "splash",
     },
     StatusBar: {
-      backgroundColor: "#0f0f11",
+      backgroundColor: "#0A0A0C",
       style: "DARK",
     },
     PushNotifications: {

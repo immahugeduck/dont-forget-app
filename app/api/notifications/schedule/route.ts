@@ -15,6 +15,8 @@ const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
  * notifications on the device. Dates are the client's local calendar days.
  */
 export async function GET(request: Request) {
+  // Taken before reading, so anything changed after this isn't counted as synced.
+  const serverTime = new Date().toISOString()
   const userId = await getUserId()
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
@@ -69,6 +71,7 @@ export async function GET(request: Request) {
   for (const r of [...rows, ...extra]) byId.set(r.id, r)
 
   return NextResponse.json({
+    serverTime,
     items: [...byId.values()].map((r) => ({
       id: r.id,
       text: r.text,

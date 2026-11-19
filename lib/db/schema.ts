@@ -107,6 +107,9 @@ export const deviceTokens = pgTable("device_tokens", {
   enabled: boolean("enabled").notNull().default(true),
   // UTC day (YYYY-MM-DD) the daily reminder was last delivered.
   lastSentOn: date("last_sent_on", { mode: "string" }),
+  // When the phone last scheduled its own exact alarms, and how far ahead they reach.
+  localSyncedAt: timestamp("local_synced_at", { withTimezone: true }),
+  localCoveredUntil: timestamp("local_covered_until", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 })
@@ -120,6 +123,8 @@ export const taskReminders = pgTable("task_reminders", {
   // "due" = follows the task's due time automatically; "manual" = user picked it.
   source: text("source").notNull().default("manual"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  // Bumped by a DB trigger when the reminder time changes.
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 })
 
 export const userCategories = pgTable("user_categories", {

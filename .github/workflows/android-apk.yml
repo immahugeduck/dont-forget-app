@@ -54,6 +54,15 @@ jobs:
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
 
+      # Fail loudly if the secret is set but Firebase didn't make it into the APK.
+      - name: Check Firebase is bundled
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        if: env.GOOGLE_SERVICES_JSON != ''
+        run: |
+          f=$(grep -rl "google_app_id" android/app/build/generated/res/ 2>/dev/null | head -1)
+          test -n "$f" && echo "Firebase config bundled: $f" || { echo "google_app_id not found"; exit 1; }
+
       - name: Rename APK
         run: cp android/app/build/outputs/apk/debug/app-debug.apk dont-forget.apk
 

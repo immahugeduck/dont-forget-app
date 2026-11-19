@@ -1,4 +1,14 @@
-# Enabling Firebase Cloud Messaging (Android push) — one-time setup
+# Firebase Cloud Messaging (Android push)
+
+**Status: enabled 2026-11-18** (project `don-t-forget-app-2e920`). Health check:
+`GET /api/notifications/config?check=1` → `fcmCheck: "ok"` (dry-run send, nobody notified).
+
+How it avoids double alerts: the phone schedules exact local alarms and reports
+`local_synced_at` / `local_covered_until` to `device_tokens`; the server only pushes
+reminders created or changed after that (`task_reminders.updated_at`), or all of them
+if the phone lacks "Alarms & reminders" access. Needs APK build >= 3.
+
+## One-time setup (done)
 
 The code is already wired: `lib/fcm.ts` sends via FCM HTTP v1 when `FIREBASE_SERVICE_ACCOUNT`
 is set, and `.github/workflows/android-apk.yml` drops `google-services.json` into the APK
