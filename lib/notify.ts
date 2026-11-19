@@ -31,11 +31,21 @@ export function reportFailure(
   failure: unknown,
   opts: { id?: string; retry?: () => void; source?: string } = {},
 ): FailureKind {
-  const kind = classifyFailure(failure)
+  const kind = classifyFailure(failure, { online: typeof navigator === "undefined" ? undefined : navigator.onLine })
   const { title, description } = failureCopy(what, kind)
   const id = opts.id ?? `fail:${what}`
   if (kind === "offline") {
     toast.message(title, { id: "offline", description, duration: 5000 })
+    return kind
+  }
+  if (kind === "queued") {
+    toast.warning(title, {
+      id: "queued",
+      description,
+      duration: 8000,
+      action: { label: "Retry", onClick: () => void import("@/lib/offline-queue").then((m) => m.flushQueue()) },
+    })
+    logClientError(opts.source ?? what, "queued: server unreachable while online")
     return kind
   }
   if (kind === "signed-out") {

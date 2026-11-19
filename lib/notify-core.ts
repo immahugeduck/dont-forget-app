@@ -1,8 +1,10 @@
-export type FailureKind = "offline" | "signed-out" | "server" | "rejected" | "permission"
+export type FailureKind = "offline" | "queued" | "signed-out" | "server" | "rejected" | "permission"
 
 /** What went wrong, from a failed fetch Response, a thrown error, or null (= queued offline). */
-export function classifyFailure(x: unknown): FailureKind {
-  if (x === null || x === undefined) return "offline"
+export function classifyFailure(x: unknown, env: { online?: boolean } = {}): FailureKind {
+  // null = the write was queued. If the device is online, the server was
+  // unreachable (or 5xx), so don't tell the user they're offline.
+  if (x === null || x === undefined) return env.online === true ? "queued" : "offline"
   if (typeof x === "object" && x !== null && "status" in x && typeof (x as { status: unknown }).status === "number") {
     const status = (x as { status: number }).status
     if (status === 401 || status === 403) return "signed-out"
@@ -23,6 +25,11 @@ export function failureCopy(what: string, kind: FailureKind): { title: string; d
       return {
         title: "Saved on this device",
         description: `You're offline, so ${what} will sync automatically when you're back online.`,
+      }
+    case "queued":
+      return {
+        title: "Saved on this device",
+        description: `Couldn't reach the server, so ${what} will sync automatically. Tap Retry to try now.`,
       }
     case "signed-out":
       return { title: "You've been signed out", description: `Sign in again to save ${what}. Nothing on this screen is lost yet.` }
