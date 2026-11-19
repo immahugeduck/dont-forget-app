@@ -307,7 +307,7 @@ export function usePlannerData(weekStartDate: Date, category: string) {
           content,
         })
         if (!res) {
-          setStatus("offline")
+          setStatus(navigator.onLine ? "error" : "offline")
           reportFailure("your notes", null)
           return
         }
@@ -349,7 +349,7 @@ export function usePlannerData(weekStartDate: Date, category: string) {
           content,
         })
         if (!res) {
-          setStatus("offline")
+          setStatus(navigator.onLine ? "error" : "offline")
           reportFailure("your goals", null)
           return
         }
@@ -423,7 +423,7 @@ export function usePlannerData(weekStartDate: Date, category: string) {
           tz: deviceTimeZone(),
         })
         if (!res) {
-          setStatus("offline")
+          setStatus(navigator.onLine ? "error" : "offline")
           reportFailure("your tasks", null)
           return
         }

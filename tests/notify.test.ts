@@ -27,3 +27,17 @@ describe("failureCopy", () => {
     expect(failureCopy("notifications", "permission").description).toMatch(/settings/i)
   })
 })
+
+describe("queued while online (server unreachable)", () => {
+  it("does not claim the user is offline when the browser is online", () => {
+    expect(classifyFailure(null, { online: true })).toBe("queued")
+    expect(classifyFailure(null, { online: false })).toBe("offline")
+  })
+  it("says the change is kept on the device and will retry", () => {
+    const c = failureCopy("your notes", "queued")
+    expect(c.title).toMatch(/saved on this device/i)
+    expect(c.description).not.toMatch(/offline/i)
+    expect(c.description).toMatch(/retry/i)
+  })
+})
+

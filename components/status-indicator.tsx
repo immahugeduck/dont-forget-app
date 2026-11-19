@@ -25,7 +25,7 @@ export function StatusIndicator({ status }: StatusIndicatorProps) {
     },
     error: {
       icon: AlertTriangle,
-      label: "Not saved",
+      label: "Not synced",
       className: "text-red-400 bg-red-500/10",
     },
     // Signed out: everything is kept on this device only.
