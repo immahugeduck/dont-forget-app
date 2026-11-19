@@ -14,3 +14,8 @@ export function iosInstallState(o: { ua: string; maxTouchPoints: number; standal
   if (o.standalone || !isIOS(o.ua, o.maxTouchPoints)) return "none"
   return /CriOS|FxiOS|EdgiOS|OPiOS|GSA\//.test(o.ua) ? "other-browser" : "safari"
 }
+
+/** The install banner is fixed to the bottom; keep it off the auth forms so it never covers a submit button. */
+export function installPromptAllowedOn(pathname: string | null): boolean {
+  return !(pathname ?? "/").startsWith("/auth")
+}
