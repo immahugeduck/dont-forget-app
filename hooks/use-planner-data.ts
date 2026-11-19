@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
+import { reportFailure } from "@/lib/notify"
 import { authClient } from "@/lib/auth-client"
 import { ChecklistItem, TaskReminder } from "@/components/day-checklist"
 import { notifyDataChanged } from "@/lib/native-reminders"
@@ -129,7 +130,10 @@ export function usePlannerData(weekStartDate: Date, category: string) {
   const user = sessionData?.user ?? null
 
   const [isLoading, setIsLoading] = useState(true)
-  const [status, setStatus] = useState<"saved" | "saving" | "offline">("saved")
+  const [status, setStatus] = useState<"saved" | "saving" | "offline" | "error">("saved")
+  // Latest save functions, so a toast's Retry button calls the current one.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const retry = useRef<Record<string, (...args: any[]) => unknown>>({})
   const [weekData, setWeekData] = useState<Record<string, string>>({})
   const [events, setEvents] = useState<PlannerEvent[]>([])
   const [checklists, setChecklists] = useState<Record<string, ChecklistItem[]>>({})
@@ -258,8 +262,10 @@ export function usePlannerData(weekStartDate: Date, category: string) {
         setWeekData(data)
         setStatus(fromCache || pendingCount() > 0 ? "offline" : "saved")
       } catch (error) {
-        console.error("Error loading data:", error)
-        if (!cancelled) setStatus("offline")
+        if (!cancelled) {
+          setStatus("offline")
+          reportFailure("this week", error, { id: "load", source: "planner/load", retry: () => setReloadToken((t) => t + 1) })
+        }
       } finally {
         if (!cancelled) setIsLoading(false)
       }
@@ -302,13 +308,14 @@ export function usePlannerData(weekStartDate: Date, category: string) {
         })
         if (!res) {
           setStatus("offline")
+          reportFailure("your notes", null)
           return
         }
-        if (!res.ok) throw new Error("Failed to save note")
+        if (!res.ok) throw res
         setStatus("saved")
       } catch (error) {
-        console.error("Error saving day content:", error)
-        setStatus("offline")
+        setStatus("error")
+        reportFailure("your notes", error, { id: `save:note:${slotId}`, source: "planner/save-note", retry: () => retry.current.saveTask?.(slotId, content, date) })
       }
     },
     [user, category, weekKey, weekData],
@@ -343,13 +350,14 @@ export function usePlannerData(weekStartDate: Date, category: string) {
         })
         if (!res) {
           setStatus("offline")
+          reportFailure("your goals", null)
           return
         }
-        if (!res.ok) throw new Error("Failed to save goals")
+        if (!res.ok) throw res
         setStatus("saved")
       } catch (error) {
-        console.error("Error saving goals:", error)
-        setStatus("offline")
+        setStatus("error")
+        reportFailure("your goals", error, { id: "save:goals", source: "planner/save-goals", retry: () => retry.current.saveGoals?.(content) })
       }
     },
     [user, category, weekKey, weekData],
@@ -373,15 +381,15 @@ export function usePlannerData(weekStartDate: Date, category: string) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ weekStart: weekKey, category }),
       })
-      if (!res.ok) throw new Error("Failed to clear week")
+      if (!res.ok) throw res
 
       setWeekData({})
       setChecklists({})
       setStatus("saved")
       notifyDataChanged()
     } catch (error) {
-      console.error("Error clearing week:", error)
-      setStatus("offline")
+      setStatus("error")
+      reportFailure("the cleared week", error, { id: "clear-week", source: "planner/clear-week", retry: () => retry.current.clearWeek?.() })
     }
   }, [user, category, weekKey])
 
@@ -416,14 +424,15 @@ export function usePlannerData(weekStartDate: Date, category: string) {
         })
         if (!res) {
           setStatus("offline")
+          reportFailure("your tasks", null)
           return
         }
-        if (!res.ok) throw new Error("Failed to save checklist")
+        if (!res.ok) throw res
         setStatus("saved")
         notifyDataChanged()
       } catch (error) {
-        console.error("Error saving checklist:", error)
-        setStatus("offline")
+        setStatus("error")
+        reportFailure("your tasks", error, { id: `save:checklist:${date}`, source: "planner/save-checklist", retry: () => retry.current.saveChecklist?.(date, items) })
       }
     },
     [user, weekKey, checklists, category],
@@ -440,7 +449,7 @@ export function usePlannerData(weekStartDate: Date, category: string) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: checklistId, due_time: dueTime, tz: deviceTimeZone() }),
         })
-        if (!res.ok) throw new Error("Failed to save due time")
+        if (!res.ok) throw res
         // The server schedules (or moves/removes) the reminder at the due time.
         const { reminder } = (await res.json().catch(() => ({}))) as { reminder?: TaskReminder | null }
         setReminders((prev) => {
@@ -461,7 +470,7 @@ export function usePlannerData(weekStartDate: Date, category: string) {
           return updated
         })
       } catch (error) {
-        console.error("Error saving due time:", error)
+        reportFailure("the due time and its reminder", error, { id: `due:${checklistId}`, source: "planner/save-due-time", retry: () => retry.current.saveDueTime?.(checklistId, dueTime) })
       }
     },
     [user],
@@ -479,13 +488,12 @@ export function usePlannerData(weekStartDate: Date, category: string) {
           body: JSON.stringify({ checklistId, reminderDatetime }),
         })
 
-        if (response.ok) {
-          const { reminder } = await response.json()
-          setReminders((prev) => ({ ...prev, [checklistId]: reminder }))
-          notifyDataChanged()
-        }
+        if (!response.ok) throw response
+        const { reminder } = await response.json()
+        setReminders((prev) => ({ ...prev, [checklistId]: reminder }))
+        notifyDataChanged()
       } catch (error) {
-        console.error("Error saving reminder:", error)
+        reportFailure("the reminder", error, { id: `reminder:${checklistId}`, source: "planner/save-reminder", retry: () => retry.current.saveReminder?.(checklistId, reminderDatetime) })
       }
     },
     [user],
@@ -503,16 +511,15 @@ export function usePlannerData(weekStartDate: Date, category: string) {
           body: JSON.stringify({ checklistId }),
         })
 
-        if (response.ok) {
-          setReminders((prev) => {
-            const updated = { ...prev }
-            delete updated[checklistId]
-            return updated
-          })
-          notifyDataChanged()
-        }
+        if (!response.ok) throw response
+        setReminders((prev) => {
+          const updated = { ...prev }
+          delete updated[checklistId]
+          return updated
+        })
+        notifyDataChanged()
       } catch (error) {
-        console.error("Error removing reminder:", error)
+        reportFailure("removing the reminder", error, { id: `reminder:${checklistId}`, source: "planner/remove-reminder", retry: () => retry.current.removeReminder?.(checklistId) })
       }
     },
     [user],
@@ -526,6 +533,8 @@ export function usePlannerData(weekStartDate: Date, category: string) {
     setChecklists({})
     setReminders({})
   }, [])
+
+  retry.current = { saveTask, saveGoals, clearWeek, saveChecklist, saveDueTime, saveReminder, removeReminder }
 
   return {
     user,

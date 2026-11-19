@@ -47,6 +47,11 @@ export async function sendOrQueue(key: string, url: string, method: string, payl
   const body = JSON.stringify(payload)
   try {
     const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body })
+    if (res.status === 401) {
+      // Session expired: keep the write so it isn't lost; it replays after sign-in.
+      write([...read().filter((w) => w.key !== key), { key, url, method, body, queuedAt: Date.now() }])
+      return res
+    }
     if (res.status < 500) {
       // Anything newer supersedes an older queued write for the same key.
       if (res.ok) write(read().filter((w) => w.key !== key))
@@ -73,8 +78,8 @@ export async function flushQueue(): Promise<number> {
           headers: { "Content-Type": "application/json" },
           body: item.body,
         })
-        if (res.status >= 500) break
-        // 2xx done; 4xx (e.g. signed out, bad data) will never succeed: drop it.
+        if (res.status >= 500 || res.status === 401) break // retry later (server down / signed out)
+        // 2xx done; other 4xx (bad data) will never succeed: drop it.
         write(read().filter((w) => !(w.key === item.key && w.queuedAt === item.queuedAt)))
       } catch {
         break // still offline
