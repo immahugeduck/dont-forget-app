@@ -93,10 +93,27 @@ export async function GET(request: Request) {
     )
   }
 
+  const latNum = Number(lat)
+  const lonNum = Number(lon)
+
+  if (
+    !Number.isFinite(latNum) ||
+    !Number.isFinite(lonNum) ||
+    latNum < -90 ||
+    latNum > 90 ||
+    lonNum < -180 ||
+    lonNum > 180
+  ) {
+    return NextResponse.json(
+      { error: "Invalid lat or lon parameters" },
+      { status: 400 }
+    )
+  }
+
   try {
     // Step 1: Get grid coordinates for the location
     const pointsResponse = await fetch(
-      `https://api.weather.gov/points/${lat},${lon}`,
+      `https://api.weather.gov/points/${latNum},${lonNum}`,
       {
         headers: {
           "User-Agent": "(Last-One Planner, contact@example.com)",
