@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { db } from "@/lib/db"
-import { pushSubscriptions, taskReminders, checklists, deviceTokens } from "@/lib/db/schema"
+import { notes, pushSubscriptions, taskReminders, checklists, deviceTokens } from "@/lib/db/schema"
 import { and, eq, inArray, isNotNull, isNull, lt, lte, or } from "drizzle-orm"
 import { wallClock } from "@/lib/reminder-clock"
 import { isFcmConfigured, sendFcmToTokens, type FcmPayload } from "@/lib/fcm"
@@ -176,6 +176,35 @@ export async function GET(request: Request) {
     }
   }
 
+  let journalSent = 0
+  const dueNotes = await db.select({ id: notes.id, key: notes.date, userId: notes.userId, at: notes.reminderAt })
+    .from(notes).where(lte(notes.reminderAt, now)).orderBy(notes.reminderAt).limit(100)
+  for (const note of dueNotes) {
+    if (!note.at) continue
+    const owner = and(eq(notes.id, note.id), eq(notes.userId, note.userId))
+    // Lease the alert so another tick can retry after a crash. A concurrent
+    // reschedule or cancellation changes the timestamp and wins over cleanup.
+    const lease = new Date(Date.now() + 5 * 60_000)
+    const claimed = await db.update(notes).set({ reminderAt: lease })
+      .where(and(owner, eq(notes.reminderAt, note.at))).returning({ id: notes.id })
+    if (!claimed.length) continue
+    const [subs, devices] = await Promise.all([
+      webPushReady ? db.select().from(pushSubscriptions).where(and(eq(pushSubscriptions.userId, note.userId), eq(pushSubscriptions.enabled, true))) : [],
+      fcmReady ? db.select({token: deviceTokens.token}).from(deviceTokens).where(and(eq(deviceTokens.userId, note.userId), eq(deviceTokens.enabled, true))) : [],
+    ])
+    const day = note.key.slice(0, 10)
+    const alert = {title: 'Journal reminder', body: `Revisit your note for ${formatTaskDate(day)}.`, url: `/?date=${encodeURIComponent(day)}&journalCategory=${encodeURIComponent(note.key.slice(11))}`, tag: `journal-${note.id}`}
+    const [web, native] = await Promise.all([
+      Promise.all(subs.map(sub => sendToSub(sub, JSON.stringify(alert), TASK_PUSH_OPTIONS))),
+      sendToDeviceTokens(devices.map(d => d.token), alert),
+    ])
+    const delivered = native > 0 || web.some(Boolean)
+    if (delivered) journalSent++
+    if (delivered || (!subs.length && !devices.length)) {
+      await db.update(notes).set({reminderAt: null}).where(and(owner, eq(notes.reminderAt, lease)))
+    }
+  }
+
   // --- Task reminders due now ---
   let taskRemindersSent = 0
   let taskRemindersFailed = 0
@@ -265,6 +294,7 @@ export async function GET(request: Request) {
     at: now.toISOString(),
     channels: { webPush: webPushReady, fcm: fcmReady },
     taskReminders: { sent: taskRemindersSent, failed: taskRemindersFailed },
+    journalReminders: { sent: journalSent },
     tests: { sent: testsSent },
   })
 }

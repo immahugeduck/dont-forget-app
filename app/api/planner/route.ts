@@ -70,7 +70,7 @@ export async function GET(request: NextRequest) {
       : []
 
   return NextResponse.json({
-    notes: notesRows.map((r) => ({ date: r.date, content: r.content })),
+    notes: notesRows.map((r) => ({ date: r.date, content: r.content, reminderAt: r.reminderAt })),
     events: eventsRows.map((r) => ({
       id: r.id,
       user_id: r.userId,

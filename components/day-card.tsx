@@ -13,7 +13,12 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 
+import { JournalReminder } from './journal-reminder'
+
 interface DayCardProps {
+  noteKey: string
+  noteTime?: string | null
+  onNoteTime?: (key: string, at: string | null) => void
   slot: { id: string; label: string; fullLabel: string }
   date?: Date
   content: string
@@ -41,6 +46,7 @@ const MONTHS = [
 ]
 
 export function DayCard({
+  noteKey, noteTime, onNoteTime,
   slot,
   date,
   content,
@@ -190,6 +196,8 @@ export function DayCard({
             rows={3}
             spellCheck={false}
           />
+
+          {!isGoals && !!localContent.trim() && <JournalReminder key={noteKey} noteKey={noteKey} at={noteTime} onChange={onNoteTime} enabled={!!notificationsEnabled} />}
 
           {/* Checklist */}
           {!isGoals && (

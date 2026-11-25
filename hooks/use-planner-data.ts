@@ -134,6 +134,7 @@ export function usePlannerData(weekStartDate: Date, category: string) {
   // Latest save functions, so a toast's Retry button calls the current one.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const retry = useRef<Record<string, (...args: any[]) => unknown>>({})
+  const [noteTimes, setNoteTimes] = useState<Record<string, string | null>>({})
   const [weekData, setWeekData] = useState<Record<string, string>>({})
   const [events, setEvents] = useState<PlannerEvent[]>([])
   const [checklists, setChecklists] = useState<Record<string, ChecklistItem[]>>({})
@@ -199,7 +200,7 @@ export function usePlannerData(weekStartDate: Date, category: string) {
       if (reloadToken === 0) setIsLoading(true)
       try {
         let payload: {
-          notes: { date: string; content: string }[]
+          notes: { date: string; content: string; reminderAt?: string }[]
           events: PlannerEvent[]
           checklists: ChecklistRow[]
           reminders: TaskReminder[]
@@ -259,6 +260,7 @@ export function usePlannerData(weekStartDate: Date, category: string) {
         })
         setReminders(remindersMap)
 
+        setNoteTimes(Object.fromEntries(notes.filter(n => n.reminderAt).map(n => [n.date, n.reminderAt!])))
         setWeekData(data)
         setStatus(fromCache || pendingCount() > 0 ? "offline" : "saved")
       } catch (error) {
@@ -301,7 +303,8 @@ export function usePlannerData(weekStartDate: Date, category: string) {
       try {
         const dateKey = formatDateKey(date)
         const categoryDateKey = `${dateKey}-${category}`
-        setWeekData((prev) => ({ ...prev, [dateKey]: content }))
+        if (!content.trim()) setNoteTimes(times => ({ ...times, [categoryDateKey]: null }))
+      setWeekData((prev) => ({ ...prev, [dateKey]: content }))
         const res = await sendOrQueue(`note:${categoryDateKey}`, "/api/notes", "POST", {
           key: categoryDateKey,
           content,
@@ -541,6 +544,8 @@ export function usePlannerData(weekStartDate: Date, category: string) {
     isLoading,
     status,
     weekData,
+    noteTimes,
+    setNoteTimes,
     events,
     checklists,
     reminders,

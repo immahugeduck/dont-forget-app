@@ -31,7 +31,7 @@ export async function POST(request: Request) {
     await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${userId}), hashtext(${key}))`)
     const updated = await tx
       .update(notes)
-      .set({ content: content ?? "", updatedAt: new Date() })
+      .set({ content: content ?? "", updatedAt: new Date(), ...(!content?.trim() ? { reminderAt: null } : {}) })
       .where(and(eq(notes.userId, userId), eq(notes.date, key)))
       .returning({ id: notes.id })
     if (updated.length === 0 && content && content.trim()) {
