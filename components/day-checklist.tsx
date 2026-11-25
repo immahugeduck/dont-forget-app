@@ -24,6 +24,8 @@ import {
 import { CSS } from "@dnd-kit/utilities"
 import { UserTag, extractTags, stripTags } from "@/hooks/use-tags"
 import { TagPill } from "./tag-search"
+import { parseTaskTime } from "@/lib/task-time-shortcut"
+import Link from "next/link"
 
 // datetime-local inputs expect local wall-clock time; toISOString() alone would show UTC.
 function toLocalInputValue(d: Date): string {
@@ -126,6 +128,7 @@ function SortableTaskItem({
     transition,
   }
 
+  const reminderInput = useRef<HTMLInputElement>(null)
   const handleSetDueTime = (checklistId: string, time: string | null) => {
     if (onDueTimeSet) {
       // The server schedules the reminder at the due time (in this device's
@@ -302,26 +305,22 @@ function SortableTaskItem({
       )}
 
       {/* Reminder bell button */}
-      {notificationsEnabled && !item.completed && (
+      {!item.completed && (
         <Popover 
           open={openReminderId === item.id} 
           onOpenChange={(open) => setOpenReminderId(open ? item.id : null)}
         >
           <PopoverTrigger asChild>
             <button
-              className={cn(
-                "p-1 rounded transition-all",
-                hasReminder 
-                  ? "text-primary opacity-100" 
-                  : "opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-primary"
-              )}
+              className="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-md px-2 text-sm font-medium text-primary hover:bg-primary/10 focus-visible:outline-primary"
               title={hasReminder ? "Edit reminder" : "Set reminder"}
             >
               {hasReminder ? (
                 <BellRing className="w-3.5 h-3.5" />
               ) : (
-                <Bell className="w-3.5 h-3.5" />
+                <Bell className="size-4" />
               )}
+              {hasReminder ? 'Edit' : 'Remind me'}
             </button>
           </PopoverTrigger>
           <PopoverContent className="w-72 p-3" align="end">
@@ -329,6 +328,7 @@ function SortableTaskItem({
               <div className="flex items-center justify-between">
                 <h4 className="font-medium text-sm">Set Reminder</h4>
                 <button 
+                  aria-label="Close reminder"
                   onClick={() => setOpenReminderId(null)}
                   className="text-muted-foreground hover:text-foreground"
                 >
@@ -340,18 +340,25 @@ function SortableTaskItem({
                 {item.text}
               </p>
 
+              {!onReminderSet ? (
+                <p className="text-sm text-muted-foreground"><Link className="font-medium text-primary underline" href="/auth/login">Sign in</Link> to schedule reminders.</p>
+              ) : <>
+              {!notificationsEnabled && <p className="text-sm text-muted-foreground">Enable notifications in settings to receive alerts on this device.</p>}
               <div className="space-y-2">
-                <label className="text-xs font-medium text-muted-foreground">
+                <label htmlFor={`reminder-input-${item.id}`} className="text-sm font-medium">
                   Remind me at
                 </label>
                 <input
+                  ref={reminderInput}
+                  required
+                  onChange={(event) => event.currentTarget.setCustomValidity('')}
                   type="datetime-local"
                   defaultValue={hasReminder 
                     ? toLocalInputValue(new Date(reminder!.reminder_datetime)) || getDefaultReminderDatetime()
                     : getDefaultReminderDatetime()
                   }
                   min={toLocalInputValue(new Date())}
-                  className="w-full px-3 py-2 text-sm rounded-md border border-input bg-background"
+                  className="min-h-11 w-full rounded-md border border-input bg-background px-3 py-2 text-base text-foreground"
                   id={`reminder-input-${item.id}`}
                 />
               </div>
@@ -371,15 +378,16 @@ function SortableTaskItem({
                   size="sm"
                   className="flex-1"
                   onClick={() => {
-                    const input = document.getElementById(`reminder-input-${item.id}`) as HTMLInputElement
-                    if (input?.value) {
-                      handleSetReminder(item.id, input.value)
-                    }
+                    const input = reminderInput.current
+                    if (!input) return
+                    input.setCustomValidity(new Date(input.value) > new Date() ? '' : 'Choose a future reminder time.')
+                    if (input.reportValidity()) handleSetReminder(item.id, input.value)
                   }}
                 >
                   {hasReminder ? "Update" : "Set Reminder"}
                 </Button>
               </div>
+              </>}
             </div>
           </PopoverContent>
         </Popover>
@@ -504,10 +512,31 @@ export function DayChecklist({
     }
   }, [isAdding])
 
+  const shortcut = parseTaskTime(newItemText)
+  const shortcutDate = new Date(date ?? new Date())
+  if (shortcut) {
+    const [hours, minutes] = shortcut.dueTime.split(':').map(Number)
+    shortcutDate.setHours(hours, minutes, 0, 0)
+  }
+  const shortcutHint = !shortcut ? 'Add @3pm or @15:30 to set a reminder.'
+    : !shortcut.text ? 'Add a task name before saving.'
+    : shortcutDate <= new Date() ? 'Choose a future time on this planner day.'
+    : !onReminderSet ? `Due ${formatDueTime(shortcut.dueTime)} · Sign in to receive reminders.`
+    : `Reminder: ${shortcutDate.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} at ${formatDueTime(shortcut.dueTime)}${notificationsEnabled ? '' : ' · Enable notifications for alerts.'}`
+
   const addItem = () => {
     if (newItemText.trim()) {
-      const text = newItemText.trim()
+      const parsed = parseTaskTime(newItemText)
+      if (parsed && !parsed.text) return false
+      if (parsed && date) {
+        const when = new Date(date)
+        const [h, m] = parsed.dueTime.split(':').map(Number)
+        when.setHours(h, m, 0, 0)
+        if (when <= new Date()) return false
+      }
+      const text = parsed?.text ?? newItemText.trim()
       const newItem: ChecklistItem = {
+        ...(parsed && { due_time: parsed.dueTime }),
         id: crypto.randomUUID(),
         text,
         completed: false,
@@ -527,6 +556,7 @@ export function DayChecklist({
   }
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return
     if (e.key === "Enter") {
       e.preventDefault()
       if (newItemText.trim()) {
@@ -608,7 +638,8 @@ export function DayChecklist({
       </DndContext>
       
       {isAdding && (
-        <div className="flex items-center gap-2 py-1 px-1">
+        <div className="rounded-md border border-input p-2">
+          <div className="flex items-center gap-2">
           <div className="flex-shrink-0 w-4 h-4 rounded border-2 border-muted-foreground/40" />
           <input
             ref={inputRef}
@@ -618,13 +649,16 @@ export function DayChecklist({
             onKeyDown={handleKeyDown}
             onBlur={() => {
               if (newItemText.trim()) {
-                addItem()
+                if (addItem() === false) return
               }
               onAddingChange(false)
             }}
-            placeholder="Type task and press Enter..."
-            className="flex-1 text-sm bg-transparent border-none outline-none placeholder:text-muted-foreground/50"
+            aria-label="New task"
+            placeholder="Call Maya @3pm"
+            className="min-w-0 flex-1 bg-transparent text-base outline-none"
           />
+          </div>
+          <p role="status" className="mt-1 text-sm text-muted-foreground">{shortcutHint}</p>
         </div>
       )}
     </div>

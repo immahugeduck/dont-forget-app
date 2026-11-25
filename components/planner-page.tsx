@@ -566,7 +566,7 @@ export function PlannerPage() {
                 }}
                 weather={dayWeather}
                 reminders={reminders}
-                onReminderSet={saveReminder}
+                onReminderSet={user ? saveReminder : undefined}
                 onReminderRemove={removeReminder}
                 notificationsEnabled={notificationsEnabled}
                 onDueTimeSet={saveDueTime}
@@ -631,7 +631,7 @@ export function PlannerPage() {
             canGoPrev={focusedDate > MIN_DATE}
             canGoNext={focusedDate < MAX_DATE}
             reminders={reminders}
-            onReminderSet={saveReminder}
+            onReminderSet={user ? saveReminder : undefined}
             onReminderRemove={removeReminder}
             notificationsEnabled={notificationsEnabled}
             onDueTimeSet={saveDueTime}
