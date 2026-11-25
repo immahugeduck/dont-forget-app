@@ -1,3 +1,7 @@
+export function hasReminderTrigger(text: string) {
+  return /(?:^|\s)@$/.test(text)
+}
+
 export function parseTaskTime(input: string) {
   const match = /(?:^|\s)@(\d{1,2})(?::(\d{2}))?\s*(am|pm)?(?=\s|$)/i.exec(input)
   if (!match) return null

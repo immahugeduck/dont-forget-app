@@ -24,6 +24,7 @@ import {
 import { CSS } from "@dnd-kit/utilities"
 import { UserTag, extractTags, stripTags } from "@/hooks/use-tags"
 import { TagPill } from "./tag-search"
+import { ReminderTimeChoices } from './reminder-time-choices'
 import { parseTaskTime } from "@/lib/task-time-shortcut"
 import Link from "next/link"
 
@@ -638,7 +639,11 @@ export function DayChecklist({
       </DndContext>
       
       {isAdding && (
-        <div className="rounded-md border border-input p-2">
+        <div className="rounded-md border border-input p-2" onBlur={e => {
+          if (e.currentTarget.contains(e.relatedTarget)) return
+          if (newItemText.trim() && addItem() === false) return
+          onAddingChange(false)
+        }}>
           <div className="flex items-center gap-2">
           <div className="flex-shrink-0 w-4 h-4 rounded border-2 border-muted-foreground/40" />
           <input
@@ -647,17 +652,12 @@ export function DayChecklist({
             value={newItemText}
             onChange={(e) => setNewItemText(e.target.value)}
             onKeyDown={handleKeyDown}
-            onBlur={() => {
-              if (newItemText.trim()) {
-                if (addItem() === false) return
-              }
-              onAddingChange(false)
-            }}
             aria-label="New task"
             placeholder="Call Maya @3pm"
             className="min-w-0 flex-1 bg-transparent text-base outline-none"
           />
           </div>
+          <ReminderTimeChoices text={newItemText} change={text => {inputRef.current?.focus(); setNewItemText(text)}} />
           <p role="status" className="mt-1 text-sm text-muted-foreground">{shortcutHint}</p>
         </div>
       )}
