@@ -13,6 +13,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 
+import { ReminderTimeChoices } from './reminder-time-choices'
 import { JournalReminder } from './journal-reminder'
 
 interface DayCardProps {
@@ -188,7 +189,7 @@ export function DayCard({
             ref={textareaRef}
             className="w-full bg-transparent border-none resize-none focus:outline-none focus:ring-0 text-foreground text-base leading-relaxed placeholder:text-muted-foreground/50"
             placeholder={
-              isGoals ? "Set your goals for this week... #goals" : `Plan your ${slot.label.toLowerCase()}... #tags`
+              isGoals ? "Set your goals for this week... #goals" : `Plan your ${slot.label.toLowerCase()}… Type @ for a reminder.`
             }
             value={localContent}
             onChange={(e) => setLocalContent(e.target.value)}
@@ -197,7 +198,10 @@ export function DayCard({
             spellCheck={false}
           />
 
-          {!isGoals && !!localContent.trim() && <JournalReminder key={noteKey} noteKey={noteKey} at={noteTime} onChange={onNoteTime} enabled={!!notificationsEnabled} />}
+          {!isGoals && <>
+            <ReminderTimeChoices text={localContent} change={text => {setLocalContent(text); textareaRef.current?.focus()}} />
+            <JournalReminder key={noteKey} noteKey={noteKey} text={localContent} at={noteTime} onChange={onNoteTime} enabled={!!notificationsEnabled} />
+          </>}
 
           {/* Checklist */}
           {!isGoals && (
