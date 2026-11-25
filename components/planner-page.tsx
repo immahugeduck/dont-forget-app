@@ -151,6 +151,16 @@ export function PlannerPage() {
     deleteCategory,
   } = useCategories()
 
+  useEffect(() => {
+    const url = new URL(window.location.href)
+    const name = url.searchParams.get('journalCategory')
+    const category = name && categories.find(c => c.name.toLowerCase() === name)
+    if (!category) return
+    setCategoryId(category.id)
+    url.searchParams.delete('journalCategory')
+    window.history.replaceState(window.history.state, '', url)
+  }, [categories])
+
   // Set default category when categories load
   const activeCategory = categoryId 
     ? categories.find(c => c.id === categoryId) || categories[0] || FALLBACK_CATEGORY
@@ -161,6 +171,8 @@ export function PlannerPage() {
     isLoading,
     status,
     weekData,
+    noteTimes,
+    setNoteTimes,
     checklists,
     reminders,
     saveTask,
@@ -549,6 +561,9 @@ export function PlannerPage() {
             return (
               <div key={slot.id} className={isGoals ? "md:col-span-full" : "min-w-0"}>
               <DayCard
+                noteKey={`${dateKey}-${activeCategory.name.toLowerCase()}`}
+                noteTime={noteTimes[`${dateKey}-${activeCategory.name.toLowerCase()}`]}
+                onNoteTime={user ? (key, at) => setNoteTimes(times => ({ ...times, [key]: at })) : undefined}
                 slot={slot}
                 date={slotDate}
                 content={content}

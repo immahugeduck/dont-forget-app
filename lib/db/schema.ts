@@ -48,6 +48,7 @@ export const notes = pgTable("notes", {
   userId: text("user_id").notNull(),
   date: text("date").notNull(),
   content: text("content").notNull(),
+  reminderAt: timestamp("reminder_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
 })
